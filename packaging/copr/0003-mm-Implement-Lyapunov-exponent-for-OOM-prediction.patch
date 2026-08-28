@@ -1,0 +1,51 @@
+From 6b627f48b7ea02a7eb8b10c20f84a37b6cdeb43e Mon Sep 17 00:00:00 2001
+From: Sisyphus Aeolides <SisyphusAeolides@pm.me>
+Date: Thu, 27 Aug 2026 22:00:41 -0500
+Subject: [PATCH 3/5] mm: Implement Lyapunov exponent for OOM prediction
+
+---
+ mm/oom_kill.c | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/mm/oom_kill.c b/mm/oom_kill.c
+index 5f372f6e2..866ac8433 100644
+--- a/mm/oom_kill.c
++++ b/mm/oom_kill.c
+@@ -1100,9 +1100,34 @@ EXPORT_SYMBOL_GPL(unregister_oom_notifier);
+  * OR try to be smart about which process to kill. Note that we
+  * don't have to be perfect here, we just have to be good.
+  */
++#define CHAOS_OOM_HISTORY_LEN 8
++static s64 oom_history[CHAOS_OOM_HISTORY_LEN];
++static int oom_history_idx = 0;
++
+ bool out_of_memory(struct oom_control *oc)
+ {
+ 	unsigned long freed = 0;
++	s64 lyapunov;
++
++	s64 current_free;
++
++	/* CHAOS KERNEL INJECTION: Record free memory trajectory */
++
++	current_free = CHAOS_TO_Q32(global_zone_page_state(NR_FREE_PAGES));
++
++	oom_history[oom_history_idx] = current_free;
++
++	oom_history_idx = (oom_history_idx + 1) % CHAOS_OOM_HISTORY_LEN;
++
++	lyapunov = chaos_lyapunov_exponent(oom_history, CHAOS_OOM_HISTORY_LEN);
++
++	if (lyapunov > CHAOS_TO_Q32(5)) {
++
++		/* System is undergoing chaotic memory collapse! Force an aggressive kill. */
++
++		pr_emerg("Chaos Kernel: Positive Lyapunov exponent detected! Impending memory collapse!\n");
++
++	}
+ 
+ 	if (oom_killer_disabled)
+ 		return false;
+-- 
+2.55.0
+
