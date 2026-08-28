@@ -146,3 +146,15 @@
  static struct dmem_cgroup_region *dmemcg_get_region_by_name(const char *name)
  {
  	struct dmem_cgroup_region *region;
+ 
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_vram_mgr.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_vram_mgr.c
+@@ -967,7 +967,7 @@
+ 	if (err)
+ 		return err;
+ 
+-	cg = dmem_cgroup_register_region(&(struct dmem_cgroup_init){
++	cg = (dmem_cgroup_register_region)(&(struct dmem_cgroup_init){
+ 						.size = adev->gmc.real_vram_size,
+ 						.ops = &amdgpu_vram_mgr_dmem_ops,
+ 						.reclaim_priv = man,
