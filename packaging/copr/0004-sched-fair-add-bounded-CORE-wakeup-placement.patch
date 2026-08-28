@@ -1,0 +1,72 @@
+From d607ea337d9ff2ed9fa67873ab8490bab4ac6d83 Mon Sep 17 00:00:00 2001
+From: Sisyphus Aeolides <SisyphusAeolides@pm.me>
+Date: Fri, 28 Aug 2026 11:12:04 -0500
+Subject: [PATCH 4/6] sched/fair: add bounded CORE wakeup placement
+
+---
+ include/linux/sched.h   |  2 +-
+ kernel/sched/fair.c     | 14 ++++++++++++++
+ kernel/sched/features.h |  2 ++
+ 3 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index feaaa86..51be1f2 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -584,7 +584,7 @@ struct sched_entity {
+ 	unsigned char			sched_delayed;
+ 	unsigned char			rel_deadline;
+ 	unsigned char			custom_slice;
+-					/* hole */
++	u32				core_chaos_state;
+ 
+ 	u64				exec_start;
+ 	u64				sum_exec_runtime;
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 6d881e5..62742e5 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -44,6 +44,7 @@
+ 
+ #include <linux/cpuidle.h>
+ #include <linux/interrupt.h>
++#include <linux/chaos_math.h>
+ #include <linux/memory-tiers.h>
+ #include <linux/mempolicy.h>
+ #include <linux/mutex_api.h>
+@@ -6291,6 +6292,19 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 
+ 	se->vruntime = vruntime - lag;
+ 
++	if (sched_feat(CHAOS_CORE) && entity_is_task(se) &&
++	    (flags & ENQUEUE_WAKEUP)) {
++		u64 bonus;
++
++		if (!se->core_chaos_state)
++			se->core_chaos_state = chaos_mix64(se->vruntime ^
++						       se->sum_exec_runtime);
++		se->core_chaos_state =
++			chaos_logistic_step(se->core_chaos_state);
++		bonus = mul_u64_u32_shr(vslice, se->core_chaos_state, 34);
++		se->vruntime -= min(bonus, se->vruntime);
++	}
++
+ 	if (update_zero)
+ 		update_zero_vruntime(cfs_rq, -lag);
+ 
+diff --git a/kernel/sched/features.h b/kernel/sched/features.h
+index 8f0dee8..e0061e2 100644
+--- a/kernel/sched/features.h
++++ b/kernel/sched/features.h
+@@ -5,6 +5,8 @@
+  * sleep+wake cycles. EEVDF placement strategy #1, #2 if disabled.
+  */
+ SCHED_FEAT(PLACE_LAG, true)
++/* Bounded nonlinear wakeup placement; no scheduler-tick cost. */
++SCHED_FEAT(CHAOS_CORE, true)
+ /*
+  * Give new tasks half a slice to ease into the competition.
+  */
+-- 
+2.55.0
+

@@ -1,0 +1,33 @@
+From d7dde85fe9746dad19317b997fb0cf609c7c02d1 Mon Sep 17 00:00:00 2001
+From: Sisyphus Aeolides <SisyphusAeolides@pm.me>
+Date: Fri, 28 Aug 2026 11:12:04 -0500
+Subject: [PATCH 2/6] random: add stateless nonlinear entropy conditioning
+
+---
+ drivers/char/random.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index 1e112e2..819c9e5 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -50,6 +50,7 @@
+ #include <linux/syscalls.h>
+ #include <linux/completion.h>
+ #include <linux/uuid.h>
++#include <linux/chaos_math.h>
+ #include <linux/uaccess.h>
+ #include <linux/rcupdate.h>
+ #include <linux/suspend.h>
+@@ -1165,6 +1166,8 @@ static void add_timer_randomness(struct timer_rand_state *state, unsigned int nu
+ 	long delta, delta2, delta3;
+ 	unsigned int bits;
+ 
++	entropy = chaos_mix64(entropy ^ now ^ ((u64)num << 32));
++
+ 	/*
+ 	 * If we're in a hard IRQ, add_interrupt_randomness() will be called
+ 	 * sometime after, so mix into the fast pool.
+-- 
+2.55.0
+

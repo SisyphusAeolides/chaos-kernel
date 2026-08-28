@@ -1,0 +1,132 @@
+From 5f8567c7d98eb74eeda18a54fedef07688b1e786 Mon Sep 17 00:00:00 2001
+From: Sisyphus Aeolides <SisyphusAeolides@pm.me>
+Date: Fri, 28 Aug 2026 11:12:04 -0500
+Subject: [PATCH 1/6] lib: add bounded fixed-point chaos math
+
+---
+ include/linux/chaos_math.h | 15 ++++++++
+ lib/Makefile               |  2 +-
+ lib/chaos_math.c           | 76 ++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 92 insertions(+), 1 deletion(-)
+ create mode 100644 include/linux/chaos_math.h
+ create mode 100644 lib/chaos_math.c
+
+diff --git a/include/linux/chaos_math.h b/include/linux/chaos_math.h
+new file mode 100644
+index 0000000..5fc151b
+--- /dev/null
++++ b/include/linux/chaos_math.h
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _LINUX_CHAOS_MATH_H
++#define _LINUX_CHAOS_MATH_H
++
++#include <linux/types.h>
++
++#define CHAOS_Q16_ONE (1U << 16)
++
++u32 chaos_logistic_step(u32 state);
++u64 chaos_mix64(u64 value);
++u32 chaos_roessler_step(s32 *x, s32 *y, s32 *z, u32 drive);
++void chaos_duffing_step(s32 *x, s32 *velocity, u32 drive);
++u32 chaos_divergence_score(u64 previous, u64 sample);
++
++#endif
+diff --git a/lib/Makefile b/lib/Makefile
+index dee4cee..53da478 100644
+--- a/lib/Makefile
++++ b/lib/Makefile
+@@ -33,7 +33,7 @@ KASAN_SANITIZE_string.o := n
+ CFLAGS_string.o += -fno-stack-protector
+ endif
+ 
+-lib-y := ctype.o string.o vsprintf.o cmdline.o \
++lib-y := ctype.o chaos_math.o string.o vsprintf.o cmdline.o \
+ 	 rbtree.o radix-tree.o timerqueue.o xarray.o \
+ 	 maple_tree.o idr.o extable.o irq_regs.o argv_split.o \
+ 	 flex_proportions.o ratelimit.o \
+diff --git a/lib/chaos_math.c b/lib/chaos_math.c
+new file mode 100644
+index 0000000..2b439fd
+--- /dev/null
++++ b/lib/chaos_math.c
+@@ -0,0 +1,76 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <linux/chaos_math.h>
++#include <linux/export.h>
++#include <linux/kernel.h>
++#include <linux/limits.h>
++#include <linux/math64.h>
++
++static s32 chaos_q16_mul(s32 a, s32 b)
++{
++	return (s32)(((s64)a * b) >> 16);
++}
++
++u32 chaos_logistic_step(u32 state)
++{
++	u64 product, next;
++
++	if (unlikely(state < 2 || state > U32_MAX - 2))
++		state ^= 0x9e3779b9U;
++	product = (u64)state * (U32_MAX - state);
++	next = product >> 30;
++	return clamp_t(u64, next, 1, U32_MAX - 1);
++}
++EXPORT_SYMBOL_GPL(chaos_logistic_step);
++
++u64 chaos_mix64(u64 value)
++{
++	value ^= value >> 30;
++	value *= 0xbf58476d1ce4e5b9ULL;
++	value ^= value >> 27;
++	value *= 0x94d049bb133111ebULL;
++	return value ^ (value >> 31);
++}
++EXPORT_SYMBOL_GPL(chaos_mix64);
++
++u32 chaos_roessler_step(s32 *x, s32 *y, s32 *z, u32 drive)
++{
++	const s32 a = 13107, b = 13107, c = 373555;
++	s32 dx = -*y - *z;
++	s32 dy = *x + chaos_q16_mul(a, *y);
++	s32 dz = b + chaos_q16_mul(*z, *x - c);
++	s32 forcing = (s32)(drive >> 16) - 32768;
++
++	*x = clamp_t(s64, (s64)*x + (dx >> 6) + (forcing >> 8),
++		     -32LL * CHAOS_Q16_ONE, 32LL * CHAOS_Q16_ONE);
++	*y = clamp_t(s64, (s64)*y + (dy >> 6),
++		     -32LL * CHAOS_Q16_ONE, 32LL * CHAOS_Q16_ONE);
++	*z = clamp_t(s64, (s64)*z + (dz >> 6),
++		     -32LL * CHAOS_Q16_ONE, 32LL * CHAOS_Q16_ONE);
++	return chaos_mix64((u32)*x ^ ((u64)(u32)*y << 21) ^
++			   ((u64)(u32)*z << 42) ^ drive);
++}
++EXPORT_SYMBOL_GPL(chaos_roessler_step);
++
++void chaos_duffing_step(s32 *x, s32 *velocity, u32 drive)
++{
++	s32 forcing = ((s32)(drive >> 16) - 32768) << 1;
++	s32 x2 = chaos_q16_mul(*x, *x);
++	s32 x3 = chaos_q16_mul(x2, *x);
++	s32 acceleration = forcing - chaos_q16_mul(8192, *velocity) +
++			   *x - chaos_q16_mul(32768, x3);
++
++	*velocity = clamp_t(s64, (s64)*velocity + (acceleration >> 6),
++			    -8LL * CHAOS_Q16_ONE, 8LL * CHAOS_Q16_ONE);
++	*x = clamp_t(s64, (s64)*x + (*velocity >> 6),
++		     -8LL * CHAOS_Q16_ONE, 8LL * CHAOS_Q16_ONE);
++}
++EXPORT_SYMBOL_GPL(chaos_duffing_step);
++
++u32 chaos_divergence_score(u64 previous, u64 sample)
++{
++	u64 high = max(previous, sample) | 1;
++	u64 delta = previous > sample ? previous - sample : sample - previous;
++
++	return min_t(u64, mul_u64_u64_div_u64(delta, U32_MAX, high), U32_MAX);
++}
++EXPORT_SYMBOL_GPL(chaos_divergence_score);
+-- 
+2.55.0
+

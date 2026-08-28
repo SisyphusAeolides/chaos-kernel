@@ -18,9 +18,9 @@ expensive math and shared mutable state out of hot paths.
 
 ## Architecture
 
-The production kernel implementation is injected from
-`packaging/copr/chaos_injector.py` during RPM preparation. `chaos-math/` is a
-`no_std` Rust reference implementation with the same fixed-point behavior.
+The production implementation is maintained as six reviewable kernel patches
+under `packaging/copr/` and applied directly by the RPM spec. `chaos-math/` is
+a `no_std` Rust reference implementation with the same fixed-point behavior.
 
 The complete reproducible Fedora/CentOS/EPEL packaging lives in
 `packaging/copr/`.

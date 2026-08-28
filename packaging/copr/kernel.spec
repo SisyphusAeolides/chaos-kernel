@@ -195,13 +195,13 @@ Summary: The Linux kernel
 %define specrpmversion 7.3.0
 %define specversion 7.3.0
 %define patchversion 7.3
-%define pkgrelease 0.rc0.260825g66498c75b4f8.13
+%define pkgrelease 0.rc0.260825g66498c75b4f8.14
 %define kversion 7
 %define tarfile_release 7.2-13187-g66498c75b4f8
 # This is needed to do merge window version magic
 %define patchlevel 3
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 0.rc0.260825g66498c75b4f8.13%{?buildid}%{?dist}
+%define specrelease 0.rc0.260825g66498c75b4f8.14%{?buildid}%{?dist}
 # This defines the kabi tarball version
 %define kabiversion 7.3.0
 
@@ -1211,7 +1211,6 @@ Source3002: Patchlist.changelog
 %endif
 
 Source4000: README.rst
-Source8000: chaos_injector.py
 Source4001: rpminspect.yaml
 Source4002: gating.yaml
 
@@ -1222,8 +1221,13 @@ Source4002: gating.yaml
 Patch1: patch-%{patchversion}-redhat.patch
 %endif
 
-# empty final patch to facilitate testing of kernel patches
-
+# Chaos Kernel patch series
+Patch100000: 0001-lib-add-bounded-fixed-point-chaos-math.patch
+Patch100001: 0002-random-add-stateless-nonlinear-entropy-conditioning.patch
+Patch100002: 0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch
+Patch100003: 0004-sched-fair-add-bounded-CORE-wakeup-placement.patch
+Patch100004: 0005-block-add-optional-Duffing-plug-bypass.patch
+Patch100005: 0006-tcp-add-bounded-Roessler-congestion-control.patch
 
 Patch999999: linux-kernel-test.patch
 
@@ -2200,16 +2204,17 @@ cp -a %{SOURCE1} .
 ApplyOptionalPatch patch-%{patchversion}-redhat.patch
 %endif
 
-
+ApplyOptionalPatch 0001-lib-add-bounded-fixed-point-chaos-math.patch
+ApplyOptionalPatch 0002-random-add-stateless-nonlinear-entropy-conditioning.patch
+ApplyOptionalPatch 0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch
+ApplyOptionalPatch 0004-sched-fair-add-bounded-CORE-wakeup-placement.patch
+ApplyOptionalPatch 0005-block-add-optional-Duffing-plug-bypass.patch
+ApplyOptionalPatch 0006-tcp-add-bounded-Roessler-congestion-control.patch
 
 ApplyOptionalPatch linux-kernel-test.patch
 
 %{log_msg "End of patch applications"}
 # END OF PATCH APPLICATIONS
-# DYNAMIC CHAOS KERNEL INJECTION
-
-python3 %{SOURCE8000}
-
 
 # Any further pre-build tree manipulations happen here.
 %{log_msg "Pre-build tree manipulations"}

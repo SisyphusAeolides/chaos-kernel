@@ -1,0 +1,142 @@
+From c82835d48151abf4c94dba25c58c0a892ac47f49 Mon Sep 17 00:00:00 2001
+From: Sisyphus Aeolides <SisyphusAeolides@pm.me>
+Date: Fri, 28 Aug 2026 11:12:04 -0500
+Subject: [PATCH 6/6] tcp: add bounded Roessler congestion control
+
+---
+ net/ipv4/Kconfig        | 11 ++++++
+ net/ipv4/Makefile       |  1 +
+ net/ipv4/tcp_roessler.c | 80 +++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 92 insertions(+)
+ create mode 100644 net/ipv4/tcp_roessler.c
+
+diff --git a/net/ipv4/Kconfig b/net/ipv4/Kconfig
+index 301b476..ec0f114 100644
+--- a/net/ipv4/Kconfig
++++ b/net/ipv4/Kconfig
+@@ -492,6 +492,13 @@ config TCP_CONG_BIC
+ 	  increase provides TCP friendliness.
+ 	  See http://www.csc.ncsu.edu/faculty/rhee/export/bitcp/
+ 
++config TCP_CONG_ROESSLER
++	tristate "Rössler TCP"
++	default m
++	help
++	  Reno-compatible congestion control with bounded nonlinear additive
++	  increase and loss response driven by a Rössler attractor.
++
+ config TCP_CONG_CUBIC
+ 	tristate "CUBIC TCP"
+ 	default y
+@@ -721,6 +728,10 @@ endchoice
+ 
+ endif
+ 
++config TCP_CONG_ROESSLER
++	tristate
++	depends on !TCP_CONG_ADVANCED
++
+ config TCP_CONG_CUBIC
+ 	tristate
+ 	depends on !TCP_CONG_ADVANCED
+diff --git a/net/ipv4/Makefile b/net/ipv4/Makefile
+index 06e21c2..97be533 100644
+--- a/net/ipv4/Makefile
++++ b/net/ipv4/Makefile
+@@ -48,6 +48,7 @@ obj-$(CONFIG_TCP_CONG_BBR) += tcp_bbr.o
+ obj-$(CONFIG_TCP_CONG_BIC) += tcp_bic.o
+ obj-$(CONFIG_TCP_CONG_CDG) += tcp_cdg.o
+ obj-$(CONFIG_TCP_CONG_CUBIC) += tcp_cubic.o
++obj-$(CONFIG_TCP_CONG_ROESSLER) += tcp_roessler.o
+ obj-$(CONFIG_TCP_CONG_DCTCP) += tcp_dctcp.o
+ obj-$(CONFIG_TCP_CONG_WESTWOOD) += tcp_westwood.o
+ obj-$(CONFIG_TCP_CONG_HSTCP) += tcp_highspeed.o
+diff --git a/net/ipv4/tcp_roessler.c b/net/ipv4/tcp_roessler.c
+new file mode 100644
+index 0000000..61010d1
+--- /dev/null
++++ b/net/ipv4/tcp_roessler.c
+@@ -0,0 +1,80 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <linux/chaos_math.h>
++#include <linux/module.h>
++#include <net/tcp.h>
++
++struct roessler_ca { s32 x, y, z; u32 drive; };
++
++static void roessler_init(struct sock *sk)
++{
++	struct roessler_ca *ca = inet_csk_ca(sk);
++	const struct tcp_sock *tp = tcp_sk(sk);
++	u64 seed = chaos_mix64((u64)tcp_jiffies32 << 32 | tp->write_seq);
++
++	ca->x = CHAOS_Q16_ONE;
++	ca->y = seed & 0xffff;
++	ca->z = CHAOS_Q16_ONE;
++	ca->drive = seed >> 32;
++}
++
++static void roessler_cong_avoid(struct sock *sk, u32 ack, u32 acked)
++{
++	struct tcp_sock *tp = tcp_sk(sk);
++	struct roessler_ca *ca = inet_csk_ca(sk);
++	u32 cwnd, signal, divisor;
++
++	if (!tcp_is_cwnd_limited(sk))
++		return;
++	if (tcp_in_slow_start(tp)) {
++		acked = tcp_slow_start(tp, acked);
++		if (!acked)
++			return;
++	}
++	ca->drive = chaos_logistic_step(ca->drive ^ ack ^ acked);
++	signal = chaos_roessler_step(&ca->x, &ca->y, &ca->z, ca->drive);
++	cwnd = tcp_snd_cwnd(tp);
++	divisor = cwnd - (cwnd >> 3) +
++		  (u32)(((u64)(cwnd >> 2) * signal) >> 32);
++	tcp_cong_avoid_ai(tp, max(divisor, 2U), acked);
++}
++
++static u32 roessler_ssthresh(struct sock *sk)
++{
++	struct tcp_sock *tp = tcp_sk(sk);
++	struct roessler_ca *ca = inet_csk_ca(sk);
++	u32 signal = chaos_roessler_step(&ca->x, &ca->y, &ca->z,
++					 ca->drive ^ tcp_snd_cwnd(tp));
++	u32 factor = 29491 + (u32)(((u64)6554 * signal) >> 32);
++
++	return max_t(u32, ((u64)tcp_snd_cwnd(tp) * factor) >> 16, 2U);
++}
++
++static u32 roessler_undo_cwnd(struct sock *sk)
++{
++	const struct tcp_sock *tp = tcp_sk(sk);
++	return max(tcp_snd_cwnd(tp), tp->prior_cwnd);
++}
++
++static struct tcp_congestion_ops roessler __read_mostly = {
++	.init = roessler_init,
++	.ssthresh = roessler_ssthresh,
++	.undo_cwnd = roessler_undo_cwnd,
++	.cong_avoid = roessler_cong_avoid,
++	.owner = THIS_MODULE,
++	.name = "roessler",
++};
++
++static int __init roessler_register(void)
++{
++	BUILD_BUG_ON(sizeof(struct roessler_ca) > ICSK_CA_PRIV_SIZE);
++	return tcp_register_congestion_control(&roessler);
++}
++
++static void __exit roessler_unregister(void)
++{
++	tcp_unregister_congestion_control(&roessler);
++}
++module_init(roessler_register);
++module_exit(roessler_unregister);
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("Bounded Roessler TCP congestion control");
+-- 
+2.55.0
+
