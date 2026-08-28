@@ -1,0 +1,84 @@
+From 68cd4ebdb12eacf6715659de7a465de7ad083dea Mon Sep 17 00:00:00 2001
+From: Sisyphus Aeolides <SisyphusAeolides@pm.me>
+Date: Thu, 27 Aug 2026 22:07:04 -0500
+Subject: [PATCH 5/5] sched/fair: Implement CORE (Chaos-Oriented Response
+ Enhancer)
+
+---
+ include/linux/sched.h |  5 +++++
+ kernel/sched/fair.c   | 23 +++++++++++++++++++++++
+ 2 files changed, 28 insertions(+)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 8b3d47a32..07ae450ff 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -573,6 +573,11 @@ struct sched_entity {
+ 	/* For load-balancing: */
+ 	struct load_weight		load;
+ 	struct load_weight		h_load;
++	/* CHAOS KERNEL INJECTION: CORE state */
++
++	s64				core_chaos_state;
++
++	s64				core_burst_r;
+ 	struct rb_node			run_node;
+ 	u64				deadline;
+ 	u64				min_vruntime;
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 6d881e530..0fca897e8 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -44,6 +44,7 @@
+ 
+ #include <linux/cpuidle.h>
+ #include <linux/interrupt.h>
++#include <linux/chaos_math.h>
+ #include <linux/memory-tiers.h>
+ #include <linux/mempolicy.h>
+ #include <linux/mutex_api.h>
+@@ -2038,9 +2039,25 @@ static void update_curr(struct cfs_rq *cfs_rq)
+ 		return;
+ 
+ 	delta_exec = update_se(rq, curr);
++
+ 	if (unlikely(delta_exec <= 0))
+ 		return;
+ 
++	/* CHAOS KERNEL INJECTION: CORE (Chaos-Oriented Response Enhancer) */
++	if (curr->core_chaos_state == 0) {
++		curr->core_chaos_state = CHAOS_TO_Q32(1)/2;
++		curr->core_burst_r = 17137209139LL;
++	}
++	if (curr->core_burst_r > 12884901888LL) {
++		curr->core_burst_r -= delta_exec * 10;
++		if (curr->core_burst_r < 12884901888LL)
++			curr->core_burst_r = 12884901888LL;
++	}
++	curr->core_chaos_state = chaos_logistic_map_step(curr->core_burst_r, curr->core_chaos_state);
++	if (curr->core_burst_r > 15000000000LL) {
++		curr->vruntime -= (delta_exec * (curr->core_chaos_state >> 32)) / 2;
++	}
++
+ 	account_cfs_rq_runtime(cfs_rq, delta_exec);
+ 
+ 	if (!entity_is_task(curr))
+@@ -6174,9 +6191,15 @@ void __setparam_fair(struct task_struct *p, const struct sched_attr *attr)
+ 	}
+ }
+ 
++
+ static void
+ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ {
++	/* CHAOS KERNEL INJECTION: CORE Spike */
++	if (flags) {
++		se->core_burst_r = 17137209139LL;
++	}
++
+ 	u64 vslice, vruntime = avg_vruntime(cfs_rq);
+ 	unsigned int nr_queued = cfs_rq->h_nr_queued;
+ 	bool update_zero = false;
+-- 
+2.55.0
+
