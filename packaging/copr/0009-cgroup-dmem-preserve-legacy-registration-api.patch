@@ -1,0 +1,148 @@
+--- a/include/linux/cgroup_dmem.h
++++ b/include/linux/cgroup_dmem.h
+@@ -48,6 +48,9 @@
+ struct dmem_cgroup_region *
+ dmem_cgroup_register_region(const struct dmem_cgroup_init *init,
+ 			    const char *name_fmt, ...) __printf(2, 3);
++struct dmem_cgroup_region *
++dmem_cgroup_register_region_legacy(u64 size, const char *name_fmt,
++				   ...) __printf(2, 3);
+ void dmem_cgroup_unregister_region(struct dmem_cgroup_region *region);
+ int dmem_cgroup_try_charge(struct dmem_cgroup_region *region, u64 size,
+ 			   struct dmem_cgroup_pool_state **ret_pool,
+@@ -71,6 +74,12 @@
+ 	return NULL;
+ }
+ 
++static inline __printf(2, 3) struct dmem_cgroup_region *
++dmem_cgroup_register_region_legacy(u64 size, const char *name_fmt, ...)
++{
++	return NULL;
++}
++
+ static inline void dmem_cgroup_unregister_region(struct dmem_cgroup_region *region)
+ { }
+ 
+@@ -120,4 +129,16 @@
+ { }
+ 
+ #endif
++
++/*
++ * Keep source compatibility with drivers that still pass the legacy size
++ * argument while allowing new callers to pass struct dmem_cgroup_init.
++ */
++#define dmem_cgroup_register_region(_init_or_size, _name_fmt, ...) \
++	_Generic((_init_or_size), \
++		struct dmem_cgroup_init *: dmem_cgroup_register_region, \
++		const struct dmem_cgroup_init *: dmem_cgroup_register_region, \
++		default: dmem_cgroup_register_region_legacy \
++	)(_init_or_size, _name_fmt, ##__VA_ARGS__)
++
+ #endif	/* _CGROUP_DMEM_H */
+--- a/kernel/cgroup/dmem.c
++++ b/kernel/cgroup/dmem.c
+@@ -19,6 +19,9 @@
+ #include <linux/slab.h>
+ #include <linux/srcu.h>
+ 
++/* The public header uses a type-dispatch macro for source compatibility. */
++#undef dmem_cgroup_register_region
++
+ /* Maximum reclaim attempts before giving up when lowering dmem.max. */
+ #define DMEM_MAX_RECLAIM_RETRIES 16
+ 
+@@ -553,31 +556,17 @@
+ }
+ EXPORT_SYMBOL_GPL(dmem_cgroup_unregister_region);
+ 
+-/**
+- * dmem_cgroup_register_region() - Register a regions for dev cgroup.
+- * @init: Initialization parameters for the region.
+- * @fmt: Region parameters to register
+- *
+- * This function registers a node in the dmem cgroup with the
+- * name given. After calling this function, the region can be
+- * used for allocations.
+- *
+- * Return: NULL or a struct on success, PTR_ERR on failure.
+- */
+-struct dmem_cgroup_region *
+-dmem_cgroup_register_region(const struct dmem_cgroup_init *init,
+-			    const char *fmt, ...)
++static struct dmem_cgroup_region *
++dmem_cgroup_register_region_v(const struct dmem_cgroup_init *init,
++			      const char *fmt, va_list ap)
+ {
+ 	struct dmem_cgroup_region *ret;
+ 	char *region_name;
+-	va_list ap;
+ 
+ 	if (!init || !init->size)
+ 		return NULL;
+ 
+-	va_start(ap, fmt);
+ 	region_name = kvasprintf(GFP_KERNEL, fmt, ap);
+-	va_end(ap);
+ 	if (!region_name)
+ 		return ERR_PTR(-ENOMEM);
+ 
+@@ -600,8 +589,58 @@
+ 
+ 	return ret;
+ }
++
++/**
++ * dmem_cgroup_register_region() - Register a region for dev cgroup.
++ * @init: Initialization parameters for the region.
++ * @fmt: Region parameters to register
++ *
++ * This function registers a node in the dmem cgroup with the
++ * name given. After calling this function, the region can be
++ * used for allocations.
++ *
++ * Return: NULL or a struct on success, PTR_ERR on failure.
++ */
++struct dmem_cgroup_region *
++dmem_cgroup_register_region(const struct dmem_cgroup_init *init,
++			    const char *fmt, ...)
++{
++	struct dmem_cgroup_region *ret;
++	va_list ap;
++
++	va_start(ap, fmt);
++	ret = dmem_cgroup_register_region_v(init, fmt, ap);
++	va_end(ap);
++
++	return ret;
++}
+ EXPORT_SYMBOL_GPL(dmem_cgroup_register_region);
+ 
++/**
++ * dmem_cgroup_register_region_legacy() - Register a region using the legacy API.
++ * @size: Size of the region in bytes.
++ * @fmt: Region parameters to register
++ *
++ * Compatibility entry point for out-of-tree drivers using the pre-init
++ * structure API. New callers should use dmem_cgroup_register_region().
++ */
++struct dmem_cgroup_region *
++dmem_cgroup_register_region_legacy(u64 size, const char *fmt, ...)
++{
++	struct dmem_cgroup_init init = {
++		.size = size,
++	};
++	struct dmem_cgroup_region *ret;
++	va_list ap;
++
++	va_start(ap, fmt);
++	ret = dmem_cgroup_register_region_v(&init, fmt, ap);
++	va_end(ap);
++
++	return ret;
++}
++EXPORT_SYMBOL_GPL(dmem_cgroup_register_region_legacy);
++
+ static struct dmem_cgroup_region *dmemcg_get_region_by_name(const char *name)
+ {
+ 	struct dmem_cgroup_region *region;

@@ -195,13 +195,13 @@ Summary: The Linux kernel
 %define specrpmversion 7.3.0
 %define specversion 7.3.0
 %define patchversion 7.3
-%define pkgrelease 0.rc0.260825g66498c75b4f8.15
+%define pkgrelease 0.rc0.260825g66498c75b4f8.16
 %define kversion 7
 %define tarfile_release 7.2-13187-g66498c75b4f8
 # This is needed to do merge window version magic
 %define patchlevel 3
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 0.rc0.260825g66498c75b4f8.15%{?buildid}%{?dist}
+%define specrelease 0.rc0.260825g66498c75b4f8.16%{?buildid}%{?dist}
 # This defines the kabi tarball version
 %define kabiversion 7.3.0
 
@@ -1230,6 +1230,7 @@ Patch100004: 0005-block-add-optional-Duffing-plug-bypass.patch
 Patch100005: 0006-tcp-add-bounded-Roessler-congestion-control.patch
 Patch100006: 0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch
 Patch100007: 0008-sched-mm-wire-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch
+Patch100008: 0009-cgroup-dmem-preserve-legacy-registration-api.patch
 
 Patch999999: linux-kernel-test.patch
 
@@ -2214,6 +2215,7 @@ ApplyOptionalPatch 0005-block-add-optional-Duffing-plug-bypass.patch
 ApplyOptionalPatch 0006-tcp-add-bounded-Roessler-congestion-control.patch
 ApplyOptionalPatch 0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch
 ApplyOptionalPatch 0008-sched-mm-wire-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch
+ApplyOptionalPatch 0009-cgroup-dmem-preserve-legacy-registration-api.patch
 
 ApplyOptionalPatch linux-kernel-test.patch
 
