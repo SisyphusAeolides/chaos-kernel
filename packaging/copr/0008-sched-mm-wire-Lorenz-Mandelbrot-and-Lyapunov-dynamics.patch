@@ -1,0 +1,63 @@
+From ffbbd49e44a4a42dc96d25d709915fb1b713a9c9 Mon Sep 17 00:00:00 2001
+From: Sisyphus Aeolides <SisyphusAeolides@pm.me>
+Date: Fri, 28 Aug 2026 11:37:13 -0500
+Subject: [PATCH] sched mm: wire Lorenz Mandelbrot and Lyapunov dynamics
+
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 62742e5..2f59d32 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -6294,6 +6294,7 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 
+ 	if (sched_feat(CHAOS_CORE) && entity_is_task(se) &&
+ 	    (flags & ENQUEUE_WAKEUP)) {
++		s32 lx, ly, lz;
+ 		u64 bonus;
+ 
+ 		if (!se->core_chaos_state)
+@@ -6301,6 +6302,14 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 						       se->sum_exec_runtime);
+ 		se->core_chaos_state =
+ 			chaos_logistic_step(se->core_chaos_state);
++		lx = (s32)(chaos_mix64(se->vruntime) &
++			   (128U * CHAOS_Q16_ONE - 1)) - 64 * CHAOS_Q16_ONE;
++		ly = (s32)(chaos_mix64(se->sum_exec_runtime) &
++			   (128U * CHAOS_Q16_ONE - 1)) - 64 * CHAOS_Q16_ONE;
++		lz = (s32)(chaos_mix64(se->vruntime ^ se->sum_exec_runtime) &
++			   (128U * CHAOS_Q16_ONE - 1)) - 64 * CHAOS_Q16_ONE;
++		se->core_chaos_state ^=
++			chaos_lorenz_step(&lx, &ly, &lz, se->core_chaos_state);
+ 		bonus = mul_u64_u32_shr(vslice, se->core_chaos_state, 34);
+ 		se->vruntime -= min(bonus, se->vruntime);
+ 	}
+diff --git a/mm/oom_kill.c b/mm/oom_kill.c
+index 5f6abcc..261020c 100644
+--- a/mm/oom_kill.c
++++ b/mm/oom_kill.c
+@@ -1108,10 +1108,20 @@ bool out_of_memory(struct oom_control *oc)
+ 	unsigned long freed = 0;
+ 	u64 free_pages = global_zone_page_state(NR_FREE_PAGES);
+ 	u64 previous = atomic64_xchg(&chaos_last_free_pages, free_pages);
++	s32 lyapunov = chaos_lyapunov_step(previous, free_pages);
++	u64 orbit_seed = chaos_mix64(previous ^ free_pages);
++	s32 orbit_real = (s32)(orbit_seed & (4U * CHAOS_Q16_ONE - 1)) -
++			 2 * CHAOS_Q16_ONE;
++	s32 orbit_imag = (s32)((orbit_seed >> 21) &
++			       (4U * CHAOS_Q16_ONE - 1)) - 2 * CHAOS_Q16_ONE;
++	u32 mandelbrot = chaos_mandelbrot_escape(orbit_real, orbit_imag, 8);
+ 
+ 	if (previous > free_pages &&
+-	    chaos_divergence_score(previous, free_pages) > (U32_MAX >> 1))
+-		pr_warn_ratelimited("chaos: nonlinear memory collapse detected\n");
++	    chaos_divergence_score(previous, free_pages) > (U32_MAX >> 1) &&
++	    lyapunov > CHAOS_Q16_ONE / 4 && mandelbrot < 8)
++		pr_warn_ratelimited("chaos: nonlinear memory collapse detected "
++				    "(Lyapunov=%d, Mandelbrot=%u)\n",
++				    lyapunov, mandelbrot);
+ 
+ 	if (oom_killer_disabled)
+ 		return false;
+-- 
+2.55.0
+

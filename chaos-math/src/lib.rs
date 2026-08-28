@@ -11,6 +11,10 @@ fn q16_mul(a: i32, b: i32) -> i32 {
     ((a as i64 * b as i64) >> 16) as i32
 }
 
+fn q16_clamp(value: i64, low: i32, high: i32) -> i32 {
+    value.clamp(low as i64, high as i64) as i32
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn chaos_logistic_step(mut state: u32) -> u32 {
     if state < 2 || state > u32::MAX - 2 { state ^= 0x9e37_79b9; }
@@ -25,6 +29,26 @@ pub extern "C" fn chaos_mix64(mut value: u64) -> u64 {
     value ^= value >> 27;
     value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
     value ^ (value >> 31)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_lorenz_step(x: &mut i32, y: &mut i32, z: &mut i32,
+                                     drive: u32) -> u32 {
+    let sigma = 10 * Q16_ONE;
+    let rho = 28 * Q16_ONE;
+    let beta = 174_763; // 8/3 in Q16.16
+    let dx = q16_mul(sigma, *y - *x);
+    let dy = q16_mul(*x, rho - *z) - *y;
+    let dz = q16_mul(*x, *y) - q16_mul(beta, *z);
+    let forcing = (drive >> 16) as i32 - 32_768;
+    let limit = 64 * Q16_ONE;
+
+    *x = q16_clamp(*x as i64 + (dx >> 6) as i64 + (forcing >> 9) as i64,
+                   -limit, limit);
+    *y = q16_clamp(*y as i64 + (dy >> 6) as i64, -limit, limit);
+    *z = q16_clamp(*z as i64 + (dz >> 6) as i64, -limit, limit);
+    chaos_mix64(*x as u32 as u64 ^ ((*y as u32 as u64) << 21)
+        ^ ((*z as u32 as u64) << 42) ^ drive as u64) as u32
 }
 
 #[unsafe(no_mangle)]
@@ -54,6 +78,68 @@ pub extern "C" fn chaos_duffing_step(x: &mut i32, velocity: &mut i32, drive: u32
 
     *velocity = (*velocity + (acceleration >> 6)).clamp(-limit, limit);
     *x = (*x + (*velocity >> 6)).clamp(-limit, limit);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_mandelbrot_escape(real: i32, imag: i32, max_iter: u32) -> u32 {
+    let mut zr = 0;
+    let mut zi = 0;
+    let max_iter = max_iter.min(16);
+    for i in 0..max_iter {
+        let zr2 = q16_mul(zr, zr);
+        let zi2 = q16_mul(zi, zi);
+        let cross = q16_mul(zr, zi);
+        if zr2 as i64 + zi2 as i64 > 4 * Q16_ONE as i64 {
+            return i;
+        }
+        zr = q16_clamp(zr2 as i64 - zi2 as i64 + real as i64,
+                       -8 * Q16_ONE, 8 * Q16_ONE);
+        zi = q16_clamp((cross as i64) * 2 + imag as i64,
+                       -8 * Q16_ONE, 8 * Q16_ONE);
+    }
+    max_iter
+}
+
+fn q16_ln(mut value: i32) -> i32 {
+    const LN2: i32 = 45_426;
+    if value <= 0 {
+        return i32::MIN;
+    }
+    let mut exponent = 0;
+    while value >= 2 * Q16_ONE {
+        value >>= 1;
+        exponent += 1;
+    }
+    while value < Q16_ONE / 2 {
+        value <<= 1;
+        exponent -= 1;
+    }
+    let y = (((value - Q16_ONE) as i64 * Q16_ONE as i64)
+        / (value + Q16_ONE) as i64) as i32;
+    let y2 = q16_mul(y, y);
+    let mut term = y;
+    let mut sum = y;
+    term = q16_mul(term, y2);
+    sum += term / 3;
+    term = q16_mul(term, y2);
+    sum += term / 5;
+    term = q16_mul(term, y2);
+    sum += term / 7;
+    ((2 * sum) as i64 + exponent as i64 * LN2 as i64)
+        .clamp(i32::MIN as i64, i32::MAX as i64) as i32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn chaos_lyapunov_step(previous: u64, sample: u64) -> i32 {
+    if previous == 0 && sample == 0 {
+        return 0;
+    }
+    let high = previous.max(sample) | 1;
+    let low = previous.min(sample) | 1;
+    let ratio = ((high as u128 * Q16_ONE as u128) / low as u128)
+        .min((16 * Q16_ONE) as u128)
+        .max((Q16_ONE / 16) as u128) as i32;
+    q16_ln(ratio)
 }
 
 #[unsafe(no_mangle)]
