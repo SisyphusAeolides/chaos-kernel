@@ -1,15 +1,26 @@
 # Chaos Kernel
 
-**Chaos Kernel** is a fork/patchset for the mainline Linux kernel that weaves non-linear dynamics and chaos theory into the core subsystems.
+**Chaos Kernel** is a Linux kernel experiment that applies bounded nonlinear
+dynamics at carefully selected subsystem control points. The design keeps
+expensive math and shared mutable state out of hot paths.
 
 ## Subsystems
 
-1. **Entropy (`drivers/char/random.c`)**: Logistic Map chaotic PRNG.
-2. **OOM Killer (`mm/oom_kill.c`)**: Lyapunov Exponent trajectory separation for deterministic OOM prediction.
-3. **Scheduler (`kernel/sched/`)**: Lorenz & Rössler attractors for bounded, non-linear task scheduling.
-4. **TCP Congestion (`net/ipv4/tcp_cong.c`)**: Rössler attractor dynamics for congestion window sizing.
-5. **I/O Queueing (`block/blk-mq.c`)**: Duffing oscillator for non-linear queue depth absorption.
+1. **Entropy (`drivers/char/random.c`)**: stateless nonlinear conditioning
+   without entropy credit or shared-state contention.
+2. **OOM (`mm/oom_kill.c`)**: atomic free-page trajectory divergence sensing.
+3. **CORE scheduler (`kernel/sched/fair.c`)**: bounded logistic-map wakeup
+   placement using an existing `sched_entity` padding hole and no tick cost.
+4. **TCP (`net/ipv4/tcp_roessler.c`)**: Reno-compatible Rössler modulation
+   bounded to conventional additive-increase and loss-response ranges.
+5. **Block I/O (`block/blk-mq.c`)**: optional per-CPU Duffing-guided plug
+   bypass for synchronous reads; disabled by default.
 
 ## Architecture
 
-The mathematical heavy lifting is implemented in the `chaos-math/` Rust crate (compiled as `no_std` for kernel space), which exposes a C ABI to be wired directly into the Linux kernel source tree.
+The production kernel implementation is injected from
+`packaging/copr/chaos_injector.py` during RPM preparation. `chaos-math/` is a
+`no_std` Rust reference implementation with the same fixed-point behavior.
+
+The complete reproducible Fedora/CentOS/EPEL packaging lives in
+`packaging/copr/`.

@@ -1,218 +1,279 @@
-import os, sys
+#!/usr/bin/python3
 
-def modify_file(filepath, hook, injection, insert_after=True):
-    with open(filepath, 'r') as f:
-        content = f.read()
-    if hook in content:
-        if insert_after:
-            content = content.replace(hook, hook + "\n" + injection)
-        else:
-            content = content.replace(hook, injection + "\n" + hook)
-        with open(filepath, 'w') as f:
-            f.write(content)
-        print(f"Successfully injected into {filepath}")
-    else:
-        print(f"FAILED to find hook in {filepath}: {hook}")
-
-# 1. Entropy
-modify_file("drivers/char/random.c", "#include <linux/uuid.h>", "#include <linux/chaos_math.h>")
-modify_file("drivers/char/random.c", "static void add_timer_randomness", "static s64 chaos_logistic_state = (1LL << 32) / 2;\nstatic s64 chaos_logistic_r = 17137209139LL;\n", insert_after=False)
-modify_file("drivers/char/random.c", "unsigned int bits;", "\tchaos_logistic_state = chaos_logistic_map_step(chaos_logistic_r, chaos_logistic_state);\n\tentropy ^= (unsigned long)chaos_logistic_state;")
-
-# 2. OOM
-modify_file("mm/oom_kill.c", "#include <linux/oom.h>", "#include <linux/chaos_math.h>")
-modify_file("mm/oom_kill.c", "bool out_of_memory(struct oom_control *oc)", "#define CHAOS_OOM_HISTORY_LEN 8\nstatic s64 oom_history[CHAOS_OOM_HISTORY_LEN];\nstatic int oom_history_idx = 0;\n", insert_after=False)
-oom_injection = """
-	s64 lyapunov, current_free;
-	current_free = CHAOS_TO_Q32(global_zone_page_state(NR_FREE_PAGES));
-	oom_history[oom_history_idx] = current_free;
-	oom_history_idx = (oom_history_idx + 1) % CHAOS_OOM_HISTORY_LEN;
-	lyapunov = chaos_lyapunov_exponent(oom_history, CHAOS_OOM_HISTORY_LEN);
-	if (lyapunov > CHAOS_TO_Q32(5)) {
-		pr_emerg("Chaos Kernel: Positive Lyapunov exponent detected! Impending memory collapse!\\n");
-	}
-"""
-modify_file("mm/oom_kill.c", "unsigned long freed = 0;", oom_injection)
-
-# 3. I/O Block
-modify_file("block/blk-mq.c", "#include <linux/blkdev.h>", "#include <linux/chaos_math.h>")
-modify_file("block/blk-mq.c", "void blk_mq_submit_bio(struct bio *bio)", "static s64 duffing_x = 0;\nstatic s64 duffing_v = 0;\nstatic s64 duffing_t = 0;\n", insert_after=False)
-blk_injection = """
-	s64 dt = CHAOS_TO_Q32(1) / 100;
-	chaos_duffing_step(CHAOS_TO_Q32(1)/10, CHAOS_TO_Q32(1), CHAOS_TO_Q32(1)/2, CHAOS_TO_Q32(2), CHAOS_TO_Q32(1), &duffing_x, &duffing_v, duffing_t, dt);
-	duffing_t += dt;
-	if (duffing_v > CHAOS_TO_Q32(5)) {
-		bio->bi_opf |= REQ_NOWAIT;
-	}
-"""
-modify_file("block/blk-mq.c", "void blk_mq_submit_bio(struct bio *bio)\n{", blk_injection)
-
-# 4. Sched
-modify_file("include/linux/sched.h", "struct load_weight		h_load;", "\ts64\t\t\t\tcore_chaos_state;\n\ts64\t\t\t\tcore_burst_r;")
-modify_file("kernel/sched/fair.c", "#include <linux/interrupt.h>", "#include <linux/chaos_math.h>")
-
-update_curr_injection = """
-	if (unlikely(delta_exec <= 0))
-		return;
-
-	if (curr->core_chaos_state == 0) {
-		curr->core_chaos_state = CHAOS_TO_Q32(1)/2;
-		curr->core_burst_r = 17137209139LL;
-	}
-	if (curr->core_burst_r > 12884901888LL) {
-		curr->core_burst_r -= delta_exec * 10;
-		if (curr->core_burst_r < 12884901888LL)
-			curr->core_burst_r = 12884901888LL;
-	}
-	curr->core_chaos_state = chaos_logistic_map_step(curr->core_burst_r, curr->core_chaos_state);
-	if (curr->core_burst_r > 15000000000LL) {
-		curr->vruntime -= (delta_exec * (curr->core_chaos_state >> 32)) / 2;
-	}
-"""
-with open("kernel/sched/fair.c", "r") as f:
-    fc = f.read()
-fc = fc.replace("\tif (unlikely(delta_exec <= 0))\n\t\treturn;\n", update_curr_injection, 1)
-
-place_entity_injection = """static void
-place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
-{
-	if (flags) {
-		se->core_burst_r = 17137209139LL;
-	}
-"""
-fc = fc.replace("static void\nplace_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)\n{", place_entity_injection)
-with open("kernel/sched/fair.c", "w") as f:
-    f.write(fc)
-print("Successfully injected into kernel/sched/fair.c")
+from pathlib import Path
 
 
-# 5. Core Math
-with open("include/linux/chaos_math.h", "w") as f:
-    f.write("""#ifndef _LINUX_CHAOS_MATH_H
+def replace_once(path, needle, replacement):
+    source = Path(path)
+    text = source.read_text()
+    count = text.count(needle)
+    if count != 1:
+        raise RuntimeError(f"{path}: expected one match, found {count}: {needle!r}")
+    source.write_text(text.replace(needle, replacement, 1))
+
+
+def write(path, content):
+    Path(path).write_text(content)
+
+
+write("include/linux/chaos_math.h", r'''/* SPDX-License-Identifier: GPL-2.0 */
+#ifndef _LINUX_CHAOS_MATH_H
 #define _LINUX_CHAOS_MATH_H
 
 #include <linux/types.h>
 
-#define CHAOS_Q32_ONE (1LL << 32)
-#define CHAOS_TO_Q32(x) ((s64)((x) * CHAOS_Q32_ONE))
-#define CHAOS_FROM_Q32(x) ((x) / (double)CHAOS_Q32_ONE)
+#define CHAOS_Q16_ONE (1U << 16)
 
-extern s64 chaos_logistic_map_step(s64 r, s64 x);
-extern void chaos_lorenz_step(s64 sigma, s64 rho, s64 beta, s64 *x, s64 *y, s64 *z, s64 dt);
-extern void chaos_roessler_step(s64 a, s64 b, s64 c, s64 *x, s64 *y, s64 *z, s64 dt);
-extern void chaos_duffing_step(s64 delta, s64 alpha, s64 beta, s64 gamma, s64 omega, s64 *x, s64 *v, s64 t, s64 dt);
-extern s64 chaos_lyapunov_exponent(const s64 *trajectory, size_t len);
+u32 chaos_logistic_step(u32 state);
+u64 chaos_mix64(u64 value);
+u32 chaos_roessler_step(s32 *x, s32 *y, s32 *z, u32 drive);
+void chaos_duffing_step(s32 *x, s32 *velocity, u32 drive);
+u32 chaos_divergence_score(u64 previous, u64 sample);
 
-#endif /* _LINUX_CHAOS_MATH_H */
-""")
+#endif
+''')
 
-with open("lib/chaos_math.c", "w") as f:
-    f.write("""#include <linux/chaos_math.h>
-#include <linux/module.h>
-
-static inline s64 chaos_mul(s64 a, s64 b) { return (s64)(((s128)a * (s128)b) >> 32); }
-
-s64 chaos_logistic_map_step(s64 r, s64 x) {
-	s64 one_minus_x = CHAOS_Q32_ONE - x;
-	return chaos_mul(r, chaos_mul(x, one_minus_x));
-}
-EXPORT_SYMBOL(chaos_logistic_map_step);
-
-void chaos_lorenz_step(s64 sigma, s64 rho, s64 beta, s64 *x, s64 *y, s64 *z, s64 dt) {
-	s64 dx = chaos_mul(sigma, *y - *x);
-	s64 dy = chaos_mul(*x, rho - *z) - *y;
-	s64 dz = chaos_mul(*x, *y) - chaos_mul(beta, *z);
-	*x += chaos_mul(dx, dt);
-	*y += chaos_mul(dy, dt);
-	*z += chaos_mul(dz, dt);
-}
-EXPORT_SYMBOL(chaos_lorenz_step);
-
-void chaos_roessler_step(s64 a, s64 b, s64 c, s64 *x, s64 *y, s64 *z, s64 dt) {
-	s64 dx = -(*y) - *z;
-	s64 dy = *x + chaos_mul(a, *y);
-	s64 dz = b + chaos_mul(*z, *x - c);
-	*x += chaos_mul(dx, dt);
-	*y += chaos_mul(dy, dt);
-	*z += chaos_mul(dz, dt);
-}
-EXPORT_SYMBOL(chaos_roessler_step);
-
-void chaos_duffing_step(s64 delta, s64 alpha, s64 beta, s64 gamma, s64 omega, s64 *x, s64 *v, s64 t, s64 dt) {
-	s64 x2 = chaos_mul(*x, *x);
-	s64 x3 = chaos_mul(x2, *x);
-	s64 dv = gamma - chaos_mul(delta, *v) - chaos_mul(alpha, *x) - chaos_mul(beta, x3);
-	*x += chaos_mul(*v, dt);
-	*v += chaos_mul(dv, dt);
-}
-EXPORT_SYMBOL(chaos_duffing_step);
-
-s64 chaos_lyapunov_exponent(const s64 *trajectory, size_t len) {
-    s64 sum_log_deriv = 0;
-    size_t i;
-    if (len < 2) return 0;
-    for (i = 1; i < len; i++) {
-        s64 diff = trajectory[i] > trajectory[i-1] ? trajectory[i] - trajectory[i-1] : trajectory[i-1] - trajectory[i];
-        s64 divergence = diff - CHAOS_Q32_ONE;
-        sum_log_deriv += divergence;
-    }
-    return sum_log_deriv / (s64)(len - 1);
-}
-EXPORT_SYMBOL(chaos_lyapunov_exponent);
-""")
-
-modify_file("lib/Makefile", "lib-y := ctype.o", "lib-y := ctype.o chaos_math.o")
-
-# 6. TCP Congestion
-with open("net/ipv4/tcp_roessler.c", "w") as f:
-    f.write("""#include <linux/module.h>
-#include <net/tcp.h>
+write("lib/chaos_math.c", r'''// SPDX-License-Identifier: GPL-2.0
 #include <linux/chaos_math.h>
+#include <linux/export.h>
+#include <linux/kernel.h>
+#include <linux/limits.h>
+#include <linux/math64.h>
 
-struct roessler_data {
-    s64 x, y, z;
+static s32 chaos_q16_mul(s32 a, s32 b)
+{
+	return (s32)(((s64)a * b) >> 16);
+}
+
+u32 chaos_logistic_step(u32 state)
+{
+	u64 product, next;
+
+	if (unlikely(state < 2 || state > U32_MAX - 2))
+		state ^= 0x9e3779b9U;
+	product = (u64)state * (U32_MAX - state);
+	next = product >> 30;
+	return clamp_t(u64, next, 1, U32_MAX - 1);
+}
+EXPORT_SYMBOL_GPL(chaos_logistic_step);
+
+u64 chaos_mix64(u64 value)
+{
+	value ^= value >> 30;
+	value *= 0xbf58476d1ce4e5b9ULL;
+	value ^= value >> 27;
+	value *= 0x94d049bb133111ebULL;
+	return value ^ (value >> 31);
+}
+EXPORT_SYMBOL_GPL(chaos_mix64);
+
+u32 chaos_roessler_step(s32 *x, s32 *y, s32 *z, u32 drive)
+{
+	const s32 a = 13107, b = 13107, c = 373555;
+	s32 dx = -*y - *z;
+	s32 dy = *x + chaos_q16_mul(a, *y);
+	s32 dz = b + chaos_q16_mul(*z, *x - c);
+	s32 forcing = (s32)(drive >> 16) - 32768;
+
+	*x = clamp_t(s64, (s64)*x + (dx >> 6) + (forcing >> 8),
+		     -32LL * CHAOS_Q16_ONE, 32LL * CHAOS_Q16_ONE);
+	*y = clamp_t(s64, (s64)*y + (dy >> 6),
+		     -32LL * CHAOS_Q16_ONE, 32LL * CHAOS_Q16_ONE);
+	*z = clamp_t(s64, (s64)*z + (dz >> 6),
+		     -32LL * CHAOS_Q16_ONE, 32LL * CHAOS_Q16_ONE);
+	return chaos_mix64((u32)*x ^ ((u64)(u32)*y << 21) ^
+			   ((u64)(u32)*z << 42) ^ drive);
+}
+EXPORT_SYMBOL_GPL(chaos_roessler_step);
+
+void chaos_duffing_step(s32 *x, s32 *velocity, u32 drive)
+{
+	s32 forcing = ((s32)(drive >> 16) - 32768) << 1;
+	s32 x2 = chaos_q16_mul(*x, *x);
+	s32 x3 = chaos_q16_mul(x2, *x);
+	s32 acceleration = forcing - chaos_q16_mul(8192, *velocity) +
+			   *x - chaos_q16_mul(32768, x3);
+
+	*velocity = clamp_t(s64, (s64)*velocity + (acceleration >> 6),
+			    -8LL * CHAOS_Q16_ONE, 8LL * CHAOS_Q16_ONE);
+	*x = clamp_t(s64, (s64)*x + (*velocity >> 6),
+		     -8LL * CHAOS_Q16_ONE, 8LL * CHAOS_Q16_ONE);
+}
+EXPORT_SYMBOL_GPL(chaos_duffing_step);
+
+u32 chaos_divergence_score(u64 previous, u64 sample)
+{
+	u64 high = max(previous, sample) | 1;
+	u64 delta = previous > sample ? previous - sample : sample - previous;
+
+	return min_t(u64, mul_u64_u64_div_u64(delta, U32_MAX, high), U32_MAX);
+}
+EXPORT_SYMBOL_GPL(chaos_divergence_score);
+''')
+
+replace_once("lib/Makefile", "lib-y := ctype.o", "lib-y := ctype.o chaos_math.o")
+
+replace_once("drivers/char/random.c", "#include <linux/uuid.h>",
+             "#include <linux/uuid.h>\n#include <linux/chaos_math.h>")
+replace_once("drivers/char/random.c", "\tunsigned int bits;",
+             "\tunsigned int bits;\n\n"
+             "\tentropy = chaos_mix64(entropy ^ now ^ ((u64)num << 32));")
+
+replace_once("mm/oom_kill.c", "#include <linux/oom.h>",
+             "#include <linux/oom.h>\n#include <linux/chaos_math.h>\n\n"
+             "static atomic64_t chaos_last_free_pages = ATOMIC64_INIT(0);")
+replace_once("mm/oom_kill.c", "\tunsigned long freed = 0;",
+             "\tunsigned long freed = 0;\n"
+             "\tu64 free_pages = global_zone_page_state(NR_FREE_PAGES);\n"
+             "\tu64 previous = atomic64_xchg(&chaos_last_free_pages, free_pages);\n\n"
+             "\tif (previous > free_pages &&\n"
+             "\t    chaos_divergence_score(previous, free_pages) > (U32_MAX >> 1))\n"
+             "\t\tpr_warn_ratelimited(\"chaos: nonlinear memory collapse detected\\n\");")
+
+replace_once("include/linux/sched.h",
+             "\tunsigned char\t\t\tcustom_slice;\n\t\t\t\t\t/* hole */",
+             "\tunsigned char\t\t\tcustom_slice;\n"
+             "\tu32\t\t\t\tcore_chaos_state;")
+replace_once("kernel/sched/features.h", "SCHED_FEAT(PLACE_LAG, true)",
+             "SCHED_FEAT(PLACE_LAG, true)\n"
+             "/* Bounded nonlinear wakeup placement; no scheduler-tick cost. */\n"
+             "SCHED_FEAT(CHAOS_CORE, true)")
+replace_once("kernel/sched/fair.c", "#include <linux/interrupt.h>",
+             "#include <linux/interrupt.h>\n#include <linux/chaos_math.h>")
+replace_once("kernel/sched/fair.c", "\tse->vruntime = vruntime - lag;",
+             "\tse->vruntime = vruntime - lag;\n\n"
+             "\tif (sched_feat(CHAOS_CORE) && entity_is_task(se) &&\n"
+             "\t    (flags & ENQUEUE_WAKEUP)) {\n"
+             "\t\tu64 bonus;\n\n"
+             "\t\tif (!se->core_chaos_state)\n"
+             "\t\t\tse->core_chaos_state = chaos_mix64(se->vruntime ^\n"
+             "\t\t\t\t\t\t       se->sum_exec_runtime);\n"
+             "\t\tse->core_chaos_state =\n"
+             "\t\t\tchaos_logistic_step(se->core_chaos_state);\n"
+             "\t\tbonus = mul_u64_u32_shr(vslice, se->core_chaos_state, 34);\n"
+             "\t\tse->vruntime -= min(bonus, se->vruntime);\n"
+             "\t}")
+
+replace_once("block/blk-mq.c", "#include <linux/blkdev.h>",
+             "#include <linux/blkdev.h>\n#include <linux/chaos_math.h>\n"
+             "#include <linux/percpu.h>")
+replace_once("block/blk-mq.c", "/**\n * blk_mq_submit_bio",
+             "static unsigned int chaos_block_bypass_shift;\n"
+             "module_param_named(chaos_bypass_shift, chaos_block_bypass_shift, uint, 0644);\n"
+             "static DEFINE_PER_CPU(s32, chaos_duffing_x);\n"
+             "static DEFINE_PER_CPU(s32, chaos_duffing_velocity);\n\n"
+             "/**\n * blk_mq_submit_bio")
+replace_once("block/blk-mq.c", "\tconst int is_sync = op_is_sync(bio->bi_opf);",
+             "\tconst int is_sync = op_is_sync(bio->bi_opf);\n\n"
+             "\tif (unlikely(chaos_block_bypass_shift && plug && is_sync &&\n"
+             "\t             bio_op(bio) == REQ_OP_READ)) {\n"
+             "\t\ts32 x = this_cpu_read(chaos_duffing_x);\n"
+             "\t\ts32 velocity = this_cpu_read(chaos_duffing_velocity);\n"
+             "\t\tu32 drive = chaos_mix64(bio->bi_iter.bi_sector ^\n"
+             "\t\t\t\t\t((u64)bio->bi_iter.bi_size << 32));\n\n"
+             "\t\tchaos_duffing_step(&x, &velocity, drive);\n"
+             "\t\tthis_cpu_write(chaos_duffing_x, x);\n"
+             "\t\tthis_cpu_write(chaos_duffing_velocity, velocity);\n"
+             "\t\tif (!((u32)velocity &\n"
+             "\t\t      ((1U << min(chaos_block_bypass_shift, 31U)) - 1)))\n"
+             "\t\t\tplug = NULL;\n"
+             "\t}")
+
+write("net/ipv4/tcp_roessler.c", r'''// SPDX-License-Identifier: GPL-2.0
+#include <linux/chaos_math.h>
+#include <linux/module.h>
+#include <net/tcp.h>
+
+struct roessler_ca { s32 x, y, z; u32 drive; };
+
+static void roessler_init(struct sock *sk)
+{
+	struct roessler_ca *ca = inet_csk_ca(sk);
+	const struct tcp_sock *tp = tcp_sk(sk);
+	u64 seed = chaos_mix64((u64)tcp_jiffies32 << 32 | tp->write_seq);
+
+	ca->x = CHAOS_Q16_ONE;
+	ca->y = seed & 0xffff;
+	ca->z = CHAOS_Q16_ONE;
+	ca->drive = seed >> 32;
+}
+
+static void roessler_cong_avoid(struct sock *sk, u32 ack, u32 acked)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct roessler_ca *ca = inet_csk_ca(sk);
+	u32 cwnd, signal, divisor;
+
+	if (!tcp_is_cwnd_limited(sk))
+		return;
+	if (tcp_in_slow_start(tp)) {
+		acked = tcp_slow_start(tp, acked);
+		if (!acked)
+			return;
+	}
+	ca->drive = chaos_logistic_step(ca->drive ^ ack ^ acked);
+	signal = chaos_roessler_step(&ca->x, &ca->y, &ca->z, ca->drive);
+	cwnd = tcp_snd_cwnd(tp);
+	divisor = cwnd - (cwnd >> 3) +
+		  (u32)(((u64)(cwnd >> 2) * signal) >> 32);
+	tcp_cong_avoid_ai(tp, max(divisor, 2U), acked);
+}
+
+static u32 roessler_ssthresh(struct sock *sk)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct roessler_ca *ca = inet_csk_ca(sk);
+	u32 signal = chaos_roessler_step(&ca->x, &ca->y, &ca->z,
+					 ca->drive ^ tcp_snd_cwnd(tp));
+	u32 factor = 29491 + (u32)(((u64)6554 * signal) >> 32);
+
+	return max_t(u32, ((u64)tcp_snd_cwnd(tp) * factor) >> 16, 2U);
+}
+
+static u32 roessler_undo_cwnd(struct sock *sk)
+{
+	const struct tcp_sock *tp = tcp_sk(sk);
+	return max(tcp_snd_cwnd(tp), tp->prior_cwnd);
+}
+
+static struct tcp_congestion_ops roessler __read_mostly = {
+	.init = roessler_init,
+	.ssthresh = roessler_ssthresh,
+	.undo_cwnd = roessler_undo_cwnd,
+	.cong_avoid = roessler_cong_avoid,
+	.owner = THIS_MODULE,
+	.name = "roessler",
 };
 
-static void tcp_roessler_init(struct sock *sk) {
-    struct roessler_data *ca = inet_csk_ca(sk);
-    ca->x = CHAOS_TO_Q32(1); ca->y = 0; ca->z = 0;
+static int __init roessler_register(void)
+{
+	BUILD_BUG_ON(sizeof(struct roessler_ca) > ICSK_CA_PRIV_SIZE);
+	return tcp_register_congestion_control(&roessler);
 }
 
-static void tcp_roessler_cong_avoid(struct sock *sk, u32 ack, u32 acked) {
-    struct tcp_sock *tp = tcp_sk(sk);
-    struct roessler_data *ca = inet_csk_ca(sk);
-    s64 dt = CHAOS_TO_Q32(1)/10;
-    chaos_roessler_step(CHAOS_TO_Q32(2)/10, CHAOS_TO_Q32(2)/10, CHAOS_TO_Q32(57)/10, &ca->x, &ca->y, &ca->z, dt);
-    
-    if (ca->x > 0) tcp_slow_start(tp, acked);
-    else tcp_cong_avoid_ai(tp, tp->snd_cwnd, 1);
+static void __exit roessler_unregister(void)
+{
+	tcp_unregister_congestion_control(&roessler);
 }
-
-static void tcp_roessler_set_state(struct sock *sk, u8 new_state) {
-    struct roessler_data *ca = inet_csk_ca(sk);
-    if (new_state == TCP_CA_Loss) ca->z += CHAOS_TO_Q32(10);
-}
-
-static u32 tcp_roessler_ssthresh(struct sock *sk) {
-    const struct tcp_sock *tp = tcp_sk(sk);
-    struct roessler_data *ca = inet_csk_ca(sk);
-    return max((u32)(tp->snd_cwnd - (ca->y >> 32)), 2U);
-}
-
-static struct tcp_congestion_ops tcp_roessler __read_mostly = {
-    .init = tcp_roessler_init,
-    .ssthresh = tcp_roessler_ssthresh,
-    .cong_avoid = tcp_roessler_cong_avoid,
-    .set_state = tcp_roessler_set_state,
-    .owner = THIS_MODULE,
-    .name = "roessler",
-};
-
-static int __init tcp_roessler_register(void) { return tcp_register_congestion_control(&tcp_roessler); }
-static void __exit tcp_roessler_unregister(void) { tcp_unregister_congestion_control(&tcp_roessler); }
-module_init(tcp_roessler_register);
-module_exit(tcp_roessler_unregister);
+module_init(roessler_register);
+module_exit(roessler_unregister);
 MODULE_LICENSE("GPL");
-""")
+MODULE_DESCRIPTION("Bounded Roessler TCP congestion control");
+''')
 
-modify_file("net/ipv4/Makefile", "obj-$(CONFIG_TCP_CONG_CUBIC) += tcp_cubic.o", "obj-$(CONFIG_TCP_CONG_CUBIC) += tcp_cubic.o\nobj-y += tcp_roessler.o")
+visible = '''config TCP_CONG_ROESSLER
+\ttristate "Rössler TCP"
+\tdefault m
+\thelp
+\t  Reno-compatible congestion control with bounded nonlinear additive
+\t  increase and loss response driven by a Rössler attractor.
+
+'''
+replace_once("net/ipv4/Kconfig", "config TCP_CONG_CUBIC\n\ttristate \"CUBIC TCP\"",
+             visible + "config TCP_CONG_CUBIC\n\ttristate \"CUBIC TCP\"")
+replace_once("net/ipv4/Kconfig", "config TCP_CONG_CUBIC\n\ttristate\n\tdepends on !TCP_CONG_ADVANCED",
+             "config TCP_CONG_ROESSLER\n\ttristate\n\tdepends on !TCP_CONG_ADVANCED\n\n"
+             "config TCP_CONG_CUBIC\n\ttristate\n\tdepends on !TCP_CONG_ADVANCED")
+replace_once("net/ipv4/Makefile", "obj-$(CONFIG_TCP_CONG_CUBIC) += tcp_cubic.o",
+             "obj-$(CONFIG_TCP_CONG_CUBIC) += tcp_cubic.o\n"
+             "obj-$(CONFIG_TCP_CONG_ROESSLER) += tcp_roessler.o")

@@ -3,6 +3,12 @@
 This directory contains the Fedora dist-git packaging used to build Chaos
 Kernel in COPR.
 
+The build enables CORE and the `tcp_roessler` module. CORE can be toggled at
+runtime through `/sys/kernel/debug/sched/features` using `CHAOS_CORE` or
+`NO_CHAOS_CORE`. Duffing-guided block plug bypass is intentionally disabled by
+default and can be enabled with the `blk_mq.chaos_bypass_shift` kernel-module
+parameter for controlled benchmarking.
+
 Download the source archives from Fedora's lookaside cache:
 
 ```sh
