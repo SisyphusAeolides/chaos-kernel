@@ -1,0 +1,182 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chaos Kernel Maintainers <chaos-kernel@localhost>
+Date: Sun, 30 Aug 2026 10:00:00 -0500
+Subject: [PATCH] clk 6.12: enable full bounded chaos feature set
+
+Port the remaining Chaos Kernel hooks to the CIQ CLK 6.12.104 source layout.
+The block path has a bounded enabled default and remains disableable with the
+documented kernel parameter.
+
+---
+ 169 lines changed
+---
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -33,6 +33,7 @@
+ #include <linux/fcntl.h>
+ #include <linux/slab.h>
+ #include <linux/random.h>
++#include <linux/chaos_math.h>
+ #include <linux/poll.h>
+ #include <linux/init.h>
+ #include <linux/fs.h>
+@@ -1144,6 +1145,8 @@
+ 	long delta, delta2, delta3;
+ 	unsigned int bits;
+ 
++	entropy = chaos_mix64(entropy ^ now ^ ((u64)num << 32));
++
+ 	/*
+ 	 * If we're in a hard IRQ, add_interrupt_randomness() will be called
+ 	 * sometime after, so mix into the fast pool.
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -551,7 +551,7 @@
+ 	unsigned char			sched_delayed;
+ 	unsigned char			rel_deadline;
+ 	unsigned char			custom_slice;
+-					/* hole */
++	u32				core_chaos_state;
+ 
+ 	u64				exec_start;
+ 	u64				sum_exec_runtime;
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -40,6 +40,7 @@
+ 
+ #include <linux/cpuidle.h>
+ #include <linux/interrupt.h>
++#include <linux/chaos_math.h>
+ #include <linux/memory-tiers.h>
+ #include <linux/mempolicy.h>
+ #include <linux/mutex_api.h>
+@@ -5374,6 +5375,28 @@
+ 
+ 	se->vruntime = vruntime - lag;
+ 
++	if (sched_feat(CHAOS_CORE) && entity_is_task(se) &&
++	    (flags & ENQUEUE_WAKEUP)) {
++		s32 lx, ly, lz;
++		u64 bonus;
++
++		if (!se->core_chaos_state)
++			se->core_chaos_state = chaos_mix64(se->vruntime ^
++							       se->sum_exec_runtime);
++		se->core_chaos_state =
++			chaos_logistic_step(se->core_chaos_state);
++		lx = (s32)(chaos_mix64(se->vruntime) &
++			   (128U * CHAOS_Q16_ONE - 1)) - 64 * CHAOS_Q16_ONE;
++		ly = (s32)(chaos_mix64(se->sum_exec_runtime) &
++			   (128U * CHAOS_Q16_ONE - 1)) - 64 * CHAOS_Q16_ONE;
++		lz = (s32)(chaos_mix64(se->vruntime ^ se->sum_exec_runtime) &
++			   (128U * CHAOS_Q16_ONE - 1)) - 64 * CHAOS_Q16_ONE;
++		se->core_chaos_state ^=
++			chaos_lorenz_step(&lx, &ly, &lz, se->core_chaos_state);
++		bonus = mul_u64_u32_shr(vslice, se->core_chaos_state, 34);
++		se->vruntime -= min(bonus, se->vruntime);
++	}
++
+ 	if (sched_feat(PLACE_REL_DEADLINE) && se->rel_deadline) {
+ 		se->deadline += se->vruntime;
+ 		se->rel_deadline = 0;
+--- a/kernel/sched/features.h
++++ b/kernel/sched/features.h
+@@ -5,6 +5,8 @@
+  * sleep+wake cycles. EEVDF placement strategy #1, #2 if disabled.
+  */
+ SCHED_FEAT(PLACE_LAG, true)
++/* Bounded nonlinear wakeup placement; no scheduler-tick cost. */
++SCHED_FEAT(CHAOS_CORE, true)
+ /*
+  * Give new tasks half a slice to ease into the competition.
+  */
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -10,6 +10,8 @@
+ #include <linux/backing-dev.h>
+ #include <linux/bio.h>
+ #include <linux/blkdev.h>
++#include <linux/chaos_math.h>
++#include <linux/percpu.h>
+ #include <linux/blk-integrity.h>
+ #include <linux/kmemleak.h>
+ #include <linux/mm.h>
+@@ -3020,6 +3022,14 @@
+ 	return false;
+ }
+ 
++/* Enabled at a bounded default; set blk_mq.chaos_bypass_shift=0 to disable. */
++static unsigned int chaos_block_bypass_shift = 4;
++module_param_named(chaos_bypass_shift, chaos_block_bypass_shift, uint, 0644);
++MODULE_PARM_DESC(chaos_bypass_shift,
++		 "bounded Duffing plug bypass shift; zero disables it");
++static DEFINE_PER_CPU(s32, chaos_duffing_x);
++static DEFINE_PER_CPU(s32, chaos_duffing_velocity);
++
+ /**
+  * blk_mq_submit_bio - Create and send a request to block device.
+  * @bio: Bio pointer.
+@@ -3037,12 +3047,28 @@
+ {
+ 	struct request_queue *q = bdev_get_queue(bio->bi_bdev);
+ 	struct blk_plug *plug = current->plug;
++	struct blk_plug *cached_plug = plug;
+ 	const int is_sync = op_is_sync(bio->bi_opf);
+ 	struct blk_mq_hw_ctx *hctx;
+ 	unsigned int nr_segs;
+ 	struct request *rq;
+ 	blk_status_t ret;
+ 
++	if (unlikely(chaos_block_bypass_shift && plug && is_sync &&
++	             bio_op(bio) == REQ_OP_READ)) {
++		s32 x = this_cpu_read(chaos_duffing_x);
++		s32 velocity = this_cpu_read(chaos_duffing_velocity);
++		u32 drive = chaos_mix64(bio->bi_iter.bi_sector ^
++					((u64)bio->bi_iter.bi_size << 32));
++
++		chaos_duffing_step(&x, &velocity, drive);
++		this_cpu_write(chaos_duffing_x, x);
++		this_cpu_write(chaos_duffing_velocity, velocity);
++		if (!((u32)velocity &
++		      ((1U << min(chaos_block_bypass_shift, 31U)) - 1)))
++			plug = NULL;
++	}
++
+ 	/*
+ 	 * If the plug has a cached request for this queue, try to use it.
+ 	 */
+@@ -3154,7 +3180,7 @@
+ 	if (!rq)
+ 		blk_queue_exit(q);
+ 	else
+-		rq_list_add_head(&plug->cached_rqs, rq);
++		rq_list_add_head(&cached_plug->cached_rqs, rq);
+ }
+ 
+ #ifdef CONFIG_BLK_MQ_STACKING
+--- a/mm/oom_kill.c
++++ b/mm/oom_kill.c
+@@ -1118,10 +1118,20 @@
+ 	unsigned long freed = 0;
+ 	u64 free_pages = global_zone_page_state(NR_FREE_PAGES);
+ 	u64 previous = atomic64_xchg(&chaos_last_free_pages, free_pages);
++	s32 lyapunov = chaos_lyapunov_step(previous, free_pages);
++	u64 orbit_seed = chaos_mix64(previous ^ free_pages);
++	s32 orbit_real = (s32)(orbit_seed & (4U * CHAOS_Q16_ONE - 1)) -
++			 2 * CHAOS_Q16_ONE;
++	s32 orbit_imag = (s32)((orbit_seed >> 21) &
++			       (4U * CHAOS_Q16_ONE - 1)) - 2 * CHAOS_Q16_ONE;
++	u32 mandelbrot = chaos_mandelbrot_escape(orbit_real, orbit_imag, 8);
+ 
+ 	if (previous > free_pages &&
+-	    chaos_divergence_score(previous, free_pages) > (U32_MAX >> 1))
+-		pr_warn_ratelimited("chaos: nonlinear memory collapse detected\n");
++	    chaos_divergence_score(previous, free_pages) > (U32_MAX >> 1) &&
++	    lyapunov > CHAOS_Q16_ONE / 4 && mandelbrot < 8)
++		pr_warn_ratelimited("chaos: nonlinear memory collapse detected "
++				    "(Lyapunov=%d, Mandelbrot=%u)\n",
++				    lyapunov, mandelbrot);
+ 
+ 	if (oom_killer_disabled)
+ 		return false;
+

@@ -17,6 +17,7 @@ Modes:
   --apply         Apply compatible patches to KERNEL_TREE.
   --strict        Stop and fail when any required patch does not apply (default).
   --best-effort   Skip incompatible patches and their dependents.
+  --series NAME   Select patch series: auto (default), clk6.12, or legacy.
 
 The tree must be a clean, disposable kernel source tree when --apply is used.
 EOF
@@ -24,6 +25,7 @@ EOF
 
 mode=check
 policy=strict
+series=auto
 kernel_tree=
 patch_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
@@ -40,6 +42,20 @@ while [ "$#" -gt 0 ]; do
 			;;
 		--strict)
 			policy=strict
+			;;
+		--series)
+			shift
+			[ "$#" -gt 0 ] || { usage >&2; exit 2; }
+			case "$1" in
+				auto|clk6.12|legacy)
+					series=$1
+					;;
+				*)
+					printf 'error: unknown patch series: %s\n' "$1" >&2
+					usage >&2
+					exit 2
+					;;
+			esac
 			;;
 		--patch-dir)
 			shift
@@ -78,34 +94,73 @@ if [ ! -f "$kernel_tree/Makefile" ] || [ ! -d "$kernel_tree/include/linux" ]; th
 	exit 2
 fi
 
+if [ ! -d "$patch_dir" ]; then
+	printf 'error: patch directory does not exist: %s\n' "$patch_dir" >&2
+	exit 2
+fi
+patch_dir=$(CDPATH= cd -- "$patch_dir" && pwd)
+
 if ! command -v git >/dev/null 2>&1; then
 	printf 'error: git is required to check and apply the patch format\n' >&2
 	exit 2
 fi
 
-patches=(
-	0001-lib-add-bounded-fixed-point-chaos-math.patch
-	0002-random-add-stateless-nonlinear-entropy-conditioning.patch
-	0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch
-	0004-sched-fair-add-bounded-CORE-wakeup-placement.patch
-	0005-block-add-optional-Duffing-plug-bypass.patch
-	0006-tcp-add-bounded-Roessler-congestion-control.patch
-	0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch
-	0008-sched-mm-wire-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch
-	0009-cgroup-dmem-preserve-legacy-registration-api.patch
-)
+if [ "$series" = auto ]; then
+	kernel_version=$(sed -n -e 's/^VERSION[[:space:]]*=[[:space:]]*//p' \
+		-e 's/^PATCHLEVEL[[:space:]]*=[[:space:]]*//p' "$kernel_tree/Makefile" |
+		tr '\n' '.' | sed 's/\.$//')
+	if [ "$kernel_version" = 6.12 ]; then
+		series=clk6.12
+	else
+		series=legacy
+	fi
+fi
 
-declare -A dependencies=(
-	[0001-lib-add-bounded-fixed-point-chaos-math.patch]=''
-	[0002-random-add-stateless-nonlinear-entropy-conditioning.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
-	[0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
-	[0004-sched-fair-add-bounded-CORE-wakeup-placement.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
-	[0005-block-add-optional-Duffing-plug-bypass.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
-	[0006-tcp-add-bounded-Roessler-congestion-control.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
-	[0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
-	[0008-sched-mm-wire-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch]='0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch 0004-sched-fair-add-bounded-CORE-wakeup-placement.patch 0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch'
-	[0009-cgroup-dmem-preserve-legacy-registration-api.patch]=''
-)
+declare -a patches
+declare -A dependencies
+if [ "$series" = clk6.12 ]; then
+	# The CLK 6.12 source layout needs a reviewed port for the hooks whose
+	# upstream anchors moved. The port follows the common math/OOM/TCP base.
+	patches=(
+		0001-lib-add-bounded-fixed-point-chaos-math.patch
+		0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch
+		0006-tcp-add-bounded-Roessler-congestion-control.patch
+		0011-clk6.12-default-roessler.patch
+		0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch
+		0010-clk6.12-enable-full-chaos-feature-set.patch
+	)
+	dependencies=(
+		[0001-lib-add-bounded-fixed-point-chaos-math.patch]=''
+		[0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
+		[0006-tcp-add-bounded-Roessler-congestion-control.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
+		[0011-clk6.12-default-roessler.patch]='0006-tcp-add-bounded-Roessler-congestion-control.patch'
+		[0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
+		[0010-clk6.12-enable-full-chaos-feature-set.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch 0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch 0006-tcp-add-bounded-Roessler-congestion-control.patch 0011-clk6.12-default-roessler.patch 0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch'
+	)
+else
+	patches=(
+		0001-lib-add-bounded-fixed-point-chaos-math.patch
+		0002-random-add-stateless-nonlinear-entropy-conditioning.patch
+		0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch
+		0004-sched-fair-add-bounded-CORE-wakeup-placement.patch
+		0005-block-add-optional-Duffing-plug-bypass.patch
+		0006-tcp-add-bounded-Roessler-congestion-control.patch
+		0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch
+		0008-sched-mm-wire-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch
+		0009-cgroup-dmem-preserve-legacy-registration-api.patch
+	)
+	dependencies=(
+		[0001-lib-add-bounded-fixed-point-chaos-math.patch]=''
+		[0002-random-add-stateless-nonlinear-entropy-conditioning.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
+		[0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
+		[0004-sched-fair-add-bounded-CORE-wakeup-placement.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
+		[0005-block-add-optional-Duffing-plug-bypass.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
+		[0006-tcp-add-bounded-Roessler-congestion-control.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
+		[0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
+		[0008-sched-mm-wire-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch]='0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch 0004-sched-fair-add-bounded-CORE-wakeup-placement.patch 0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch'
+		[0009-cgroup-dmem-preserve-legacy-registration-api.patch]=''
+	)
+fi
 
 declare -A state
 failed=0

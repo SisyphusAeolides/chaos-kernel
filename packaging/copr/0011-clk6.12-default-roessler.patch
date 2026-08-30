@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chaos Kernel Maintainers <chaos-kernel@localhost>
+Date: Sun, 30 Aug 2026 10:00:00 -0500
+Subject: [PATCH] clk 6.12: make Rössler the built-in TCP default
+
+---
+ net/ipv4/Kconfig | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/net/ipv4/Kconfig b/net/ipv4/Kconfig
+--- a/net/ipv4/Kconfig
++++ b/net/ipv4/Kconfig
+@@ -728,1 +728,4 @@
++	config DEFAULT_ROESSLER
++		bool "Rössler" if TCP_CONG_ROESSLER=y
++
+ endchoice
+@@ -741,4 +744,5 @@
+ config DEFAULT_TCP_CONG
+ 	string
+ 	default "bic" if DEFAULT_BIC
++	default "roessler" if DEFAULT_ROESSLER
+ 	default "cubic" if DEFAULT_CUBIC

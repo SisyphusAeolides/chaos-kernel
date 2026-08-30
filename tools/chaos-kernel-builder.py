@@ -23,9 +23,10 @@ import time
 
 FEATURE_CONFIGS = {
     "core": ("SCHED_CORE=y",),
-    "tcp-roessler": ("TCP_CONG_ROESSLER=m",),
+    "tcp-roessler": ("TCP_CONG_ROESSLER=y", "DEFAULT_ROESSLER=y"),
     "block-duffing": (),
 }
+DEFAULT_FEATURES = "core,tcp-roessler,block-duffing"
 CONFIG_ASSIGNMENT = re.compile(r"^(CONFIG_[A-Z0-9_]+)=(.*)$")
 CONFIG_DISABLED = re.compile(r"^# (CONFIG_[A-Z0-9_]+) is not set$")
 
@@ -319,7 +320,7 @@ class KernelBuilder:
         for feature in self.features:
             assignments.extend(FEATURE_CONFIGS[feature])
             if feature == "block-duffing":
-                say("block-duffing is runtime opt-in; use blk_mq.chaos_bypass_shift after boot")
+                say("block-duffing is enabled with a bounded default; set blk_mq.chaos_bypass_shift=0 to disable")
         assignments.extend(self.extra_config)
         for assignment in assignments:
             self.set_config_line(config, assignment)
@@ -411,7 +412,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--patch-root", help="directory containing apply-chaos-patches.sh")
     parser.add_argument("--policy", choices=("strict", "best-effort"), default="strict")
     parser.add_argument("--config", help="optional kernel .config to seed the build")
-    parser.add_argument("--features", default="core,tcp-roessler")
+    parser.add_argument("--features", default=DEFAULT_FEATURES)
     parser.add_argument("--extra-config", action="append", default=[])
     parser.add_argument(
         "--config-ui",
@@ -497,7 +498,7 @@ def launch_gui() -> int:
                 self.preset.append_text(item)
             self.preset.set_active(0)
             self.preset.connect("changed", self.preset_changed)
-            self.features = Gtk.Entry(text="core,tcp-roessler")
+            self.features = Gtk.Entry(text=DEFAULT_FEATURES)
             self.jobs = Gtk.Entry(text=str(os.cpu_count() or 1))
             self.policy = Gtk.ComboBoxText()
             self.policy.append_text("strict")
@@ -623,8 +624,8 @@ def launch_gui() -> int:
 
         def preset_changed(self, combo: Gtk.ComboBoxText) -> None:
             presets = {
-                "performance": "core,tcp-roessler",
-                "balanced": "core",
+                "performance": DEFAULT_FEATURES,
+                "balanced": "core,tcp-roessler",
                 "safe": "none",
             }
             value = combo.get_active_text() or "custom"

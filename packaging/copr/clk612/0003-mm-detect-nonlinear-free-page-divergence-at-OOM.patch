@@ -1,0 +1,39 @@
+From fb966d06cca5c47321f318b9e854604e2d93a3f5 Mon Sep 17 00:00:00 2001
+From: Sisyphus Aeolides <SisyphusAeolides@pm.me>
+Date: Fri, 28 Aug 2026 11:12:04 -0500
+Subject: [PATCH 3/6] mm: detect nonlinear free-page divergence at OOM
+
+---
+ mm/oom_kill.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/mm/oom_kill.c b/mm/oom_kill.c
+index 5f372f6..5f6abcc 100644
+--- a/mm/oom_kill.c
++++ b/mm/oom_kill.c
+@@ -19,6 +19,9 @@
+  */
+ 
+ #include <linux/oom.h>
++#include <linux/chaos_math.h>
++
++static atomic64_t chaos_last_free_pages = ATOMIC64_INIT(0);
+ #include <linux/mm.h>
+ #include <linux/err.h>
+ #include <linux/gfp.h>
+@@ -1103,6 +1106,12 @@ EXPORT_SYMBOL_GPL(unregister_oom_notifier);
+ bool out_of_memory(struct oom_control *oc)
+ {
+ 	unsigned long freed = 0;
++	u64 free_pages = global_zone_page_state(NR_FREE_PAGES);
++	u64 previous = atomic64_xchg(&chaos_last_free_pages, free_pages);
++
++	if (previous > free_pages &&
++	    chaos_divergence_score(previous, free_pages) > (U32_MAX >> 1))
++		pr_warn_ratelimited("chaos: nonlinear memory collapse detected\n");
+ 
+ 	if (oom_killer_disabled)
+ 		return false;
+-- 
+2.55.0
+

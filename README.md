@@ -14,21 +14,27 @@ expensive math and shared mutable state out of hot paths.
    wakeup placement using an existing `sched_entity` padding hole and no tick cost.
 4. **TCP (`net/ipv4/tcp_roessler.c`)**: Reno-compatible Rössler modulation
    bounded to conventional additive-increase and loss-response ranges.
-5. **Block I/O (`block/blk-mq.c`)**: optional per-CPU Duffing-guided plug
-   bypass for synchronous reads; disabled by default.
+5. **Block I/O (`block/blk-mq.c`)**: per-CPU Duffing-guided plug bypass for
+   synchronous reads, enabled with a bounded default and disableable with
+   `blk_mq.chaos_bypass_shift=0`.
 
 ## Architecture
 
-The production implementation is maintained as nine reviewable kernel patches
-under `packaging/copr/` and applied directly by the RPM spec. `chaos-math/` is
-a `no_std` Rust reference implementation with the same fixed-point behavior.
+The production implementation is maintained as reviewable kernel patches
+under `packaging/copr/` and applied directly by the RPM spec. The CIQ CLK
+6.12.104 port is in `packaging/copr/clk612/`; it applies the common math,
+OOM, and TCP patches plus the reviewed 6.12 scheduler, random, block, and
+memory-observation port. `chaos-math/` is a `no_std` Rust reference
+implementation with the same fixed-point behavior.
 
 ## Kernel portability
 
 These are in-tree patches and cannot be universal across arbitrary Linux
 releases: scheduler, block, random, TCP, and cgroup internals change between
-kernel families. The canonical RPM series is pinned to its kernel-ark base and
-must be applied strictly there.
+kernel families. The runner selects the reviewed CLK 6.12 series for a 6.12
+source tree and the legacy series for older trees; both are strict by default.
+An unfamiliar kernel family must receive its own reviewed port before it can
+claim full feature coverage.
 
 Use the fail-closed runner to inspect another source tree before applying it:
 
@@ -54,8 +60,11 @@ The manager follows a check, configure, build, review, and install workflow.
 It operates on a disposable copy of a stock Linux tree, applies only
 compatible patches, and never changes the supplied source tree, unloads a
 driver, installs a kernel, or reboots the host automatically. The default
-performance preset enables bounded CORE and Rössler TCP support; the optional
-Duffing block path remains a runtime benchmark switch.
+performance preset enables the complete bounded feature set: CORE, built-in
+Rössler TCP as the default congestion controller, and the bounded Duffing
+block path. The packaged CLK 6.12 build also merges these defaults through
+`packaging/copr/clk612/kernel-local`. The block path can be disabled for
+recovery or comparison with `blk_mq.chaos_bypass_shift=0`.
 
 Check portability first:
 
@@ -97,4 +106,6 @@ with the selected policy, features, patch results, and produced artifacts.
 Review that manifest and the installed-kernel list before rebooting.
 
 The complete reproducible Fedora/CentOS/EPEL packaging lives in
-`packaging/copr/`.
+`packaging/copr/`. The CIQ source archive is intentionally supplied to the
+source-RPM/COPR build rather than committed to Git because it is a large
+downstream archive.
