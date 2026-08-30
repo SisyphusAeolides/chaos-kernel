@@ -1,7 +1,9 @@
 #![no_std]
 
+#[cfg(not(test))]
 use core::panic::PanicInfo;
 
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! { loop {} }
 
@@ -148,4 +150,46 @@ pub extern "C" fn chaos_divergence_score(previous: u64, sample: u64) -> u32 {
     let delta = previous.abs_diff(sample);
     ((delta as u128 * u32::MAX as u128) / high as u128)
         .min(u32::MAX as u128) as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logistic_state_stays_in_the_open_unit_interval() {
+        for state in [0, 1, 2, 0x1234_5678, u32::MAX - 1, u32::MAX] {
+            let next = chaos_logistic_step(state);
+            assert!(next > 0);
+            assert!(next < u32::MAX);
+        }
+    }
+
+    #[test]
+    fn attractors_remain_bounded() {
+        let mut lorenz = (1_000, -2_000, 3_000);
+        let mut roessler = (1_000, -2_000, 3_000);
+        let mut duffing = (1_000, 2_000);
+        for drive in 0..512 {
+            chaos_lorenz_step(&mut lorenz.0, &mut lorenz.1, &mut lorenz.2, drive);
+            chaos_roessler_step(&mut roessler.0, &mut roessler.1, &mut roessler.2, drive);
+            chaos_duffing_step(&mut duffing.0, &mut duffing.1, drive);
+            assert!(lorenz.0.abs() <= 64 * Q16_ONE);
+            assert!(lorenz.1.abs() <= 64 * Q16_ONE);
+            assert!(lorenz.2.abs() <= 64 * Q16_ONE);
+            assert!(roessler.0.abs() <= 32 * Q16_ONE);
+            assert!(roessler.1.abs() <= 32 * Q16_ONE);
+            assert!(roessler.2.abs() <= 32 * Q16_ONE);
+            assert!(duffing.0.abs() <= 8 * Q16_ONE);
+            assert!(duffing.1.abs() <= 8 * Q16_ONE);
+        }
+    }
+
+    #[test]
+    fn scores_are_bounded() {
+        assert!(chaos_mandelbrot_escape(0, 0, u32::MAX) <= 16);
+        assert!(chaos_lyapunov_step(u64::MAX, 1).is_positive());
+        assert_eq!(chaos_divergence_score(0, 0), 0);
+        assert_eq!(chaos_divergence_score(0, u64::MAX), u32::MAX);
+    }
 }
