@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Chaos Kernel Manager
+Comment=Manage, configure, and build kernels with the Chaos Kernel patch set
+Exec=python3 /home/Sisyphus/Projects/chaos-kernel/tools/chaos-kernel-builder.py --gui
+Terminal=false
+Categories=Development;System;
+Keywords=kernel;Linux;build;manager;chaos;

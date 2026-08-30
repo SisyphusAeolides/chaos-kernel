@@ -48,5 +48,53 @@ Full feature parity on a new kernel family requires a reviewed port and a
 kernel build/test pass for that family. A successful best-effort run is not a
 claim that every subsystem was enabled.
 
+## Chaos Kernel Manager
+
+The manager follows a check, configure, build, review, and install workflow.
+It operates on a disposable copy of a stock Linux tree, applies only
+compatible patches, and never changes the supplied source tree, unloads a
+driver, installs a kernel, or reboots the host automatically. The default
+performance preset enables bounded CORE and Rössler TCP support; the optional
+Duffing block path remains a runtime benchmark switch.
+
+Check portability first:
+
+```sh
+tools/chaos-kernel-builder.py check --source /path/to/linux --policy strict
+```
+
+Build a native kernel RPM from a compatible tree (best-effort is useful when a
+kernel family has moved internal APIs):
+
+```sh
+tools/chaos-kernel-builder.py build \
+  --source /path/to/linux \
+  --policy best-effort \
+  --package rpm
+```
+
+Open the GTK manager:
+
+```sh
+tools/chaos-kernel-builder.py --gui
+```
+
+The manager also lists installed `/boot/vmlinuz-*` entries, selects a default
+entry through `grubby`, launches `menuconfig`/`nconfig`/`xconfig`/`gconfig`,
+and installs a reviewed RPM or Debian artifact set. The equivalent CLI actions
+are:
+
+```sh
+tools/chaos-kernel-builder.py status
+tools/chaos-kernel-builder.py set-default --kernel /boot/vmlinuz-<version>
+tools/chaos-kernel-builder.py install \
+  --artifacts ~/Projects/chaos-kernel-build/artifacts --format rpm
+```
+
+Build output is placed below `~/Projects/chaos-kernel-build` by default. The
+manager refuses to overwrite an existing run and writes a `build.json` record
+with the selected policy, features, patch results, and produced artifacts.
+Review that manifest and the installed-kernel list before rebooting.
+
 The complete reproducible Fedora/CentOS/EPEL packaging lives in
 `packaging/copr/`.
