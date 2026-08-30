@@ -60,6 +60,7 @@ project:
 
 ```sh
 copr-cli build chaos-kernel "$builddir"/*.src.rpm
+```
 
 For the CIQ CLK 6.12 build, place
 `linux-6.12.104-1.1.el9.tar.zst` beside the files in `clk612/`, then build

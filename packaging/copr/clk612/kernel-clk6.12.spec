@@ -164,7 +164,7 @@ Summary: The Linux kernel
 %define el_version 9
 %define kernel_major_minor 6.12
 %define kernel_patch 104
-%define buildid .chaos1
+%define buildid .chaos2
 %define source_buildid .1
 %define specversion %{kernel_major_minor}.%{kernel_patch}
 %define pkgrelease 1%{?buildid}
@@ -4212,6 +4212,9 @@ fi\
 #
 #
 %changelog
+* Sun Aug 30 2026 Chaos Kernel Maintainers <maintainers@chaos-kernel.invalid> - 6.12.104-1.chaos2
+- Select only the dracut PCR module available in each build root.
+
 * Thu Aug 20 2026 github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> - 6.12.104-1.1.el9
 -- Rebased changes for Linux 6.12.104 (https://github.com/ctrliq/kernel-src-tree/releases/tag/ciq_kernel-6.12.104-1)
 -- [CIQ] v6.12.102 - updated spec (github-actions[bot])
