@@ -2049,9 +2049,11 @@ cat secureboot.pem >> ../certs/rhel.pem
 openssl x509 -inform der -in %{ima_ca_cert} -out imaca.pem
 cat imaca.pem >> ../certs/rhel.pem
 
+%if 0%{?rhel}
 for i in *.config; do
   sed -i 's@CONFIG_SYSTEM_TRUSTED_KEYS=""@CONFIG_SYSTEM_TRUSTED_KEYS="certs/ciqkernel.pem"@' $i
 done
+%endif
 
 # ifnarch noarch
 %endif
