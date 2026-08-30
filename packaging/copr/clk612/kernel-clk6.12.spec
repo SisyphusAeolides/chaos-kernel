@@ -164,7 +164,7 @@ Summary: The Linux kernel
 %define el_version 9
 %define kernel_major_minor 6.12
 %define kernel_patch 104
-%define buildid .chaos2
+%define buildid .chaos3
 %define source_buildid .1
 %define specversion %{kernel_major_minor}.%{kernel_patch}
 %define pkgrelease 1%{?buildid}
@@ -3366,7 +3366,7 @@ chmod 0755 %{buildroot}%{_libdir}/libcpupower.so*
    %{tools_make} DESTDIR=%{buildroot} install
    popd
    pushd tools/arch/x86/intel_sdsi
-   %{tools_make} CFLAGS="${RPM_OPT_FLAGS}" DESTDIR=%{buildroot} install
+   %{tools_make} CFLAGS="${RPM_OPT_FLAGS}" DESTDIR=%{buildroot} BINDIR=%{_sbindir} install
    popd
 %endif
 pushd tools/thermal/tmon
@@ -4212,6 +4212,9 @@ fi\
 #
 #
 %changelog
+* Sun Aug 30 2026 Chaos Kernel Maintainers <maintainers@chaos-kernel.invalid> - 6.12.104-1.chaos3
+- Install intel_sdsi into Fedora's merged-/usr sbin directory.
+
 * Sun Aug 30 2026 Chaos Kernel Maintainers <maintainers@chaos-kernel.invalid> - 6.12.104-1.chaos2
 - Select only the dracut PCR module available in each build root.
 
