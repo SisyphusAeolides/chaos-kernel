@@ -939,6 +939,9 @@ BuildRequires: lvm2
 BuildRequires: systemd-boot-unsigned
 # For systemd-stub and systemd-pcrphase
 BuildRequires: systemd-udev >= 252-1
+%if 0%{?fedora} >= 40
+BuildRequires: systemd-pcrphase
+%endif
 # For systemd-repart
 BuildRequires: xfsprogs e2fsprogs dosfstools
 # For UKI kernel cmdline addons
