@@ -165,7 +165,7 @@ Summary: The Linux kernel
 %define el_version 9
 %define kernel_major_minor 6.12
 %define kernel_patch 104
-%define buildid .chaos5
+%define buildid .chaos6
 %define source_buildid .1
 %define specversion %{kernel_major_minor}.%{kernel_patch}
 %define pkgrelease 1%{?buildid}
@@ -4219,6 +4219,9 @@ fi\
 #
 #
 %changelog
+* Sun Aug 30 2026 Sisyphus Aeolides <SisyphusAeolides@pm.me> - 6.12.104-1.chaos6
+- Make the CLK module-package solver portable and honor exact ignore-deps rules.
+
 * Sun Aug 30 2026 SisyphusAeolides <SisyphusAeolides@pm.me> - 6.12.104-1.chaos5
 - Keep the host-built source RPM stable while selecting the Fedora module map in Fedora chroots.
 

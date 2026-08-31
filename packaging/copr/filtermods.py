@@ -620,10 +620,16 @@ def load_config(config_pathname: str, kmod_list: KModList, variants=None):
 
     rules_list = yobj.get('rules', [])
     for rule_dict in rules_list:
+        if not isinstance(rule_dict, dict):
+            raise Exception('Rule entry must be a mapping: %r' % (rule_dict,))
         if_variant_in = rule_dict.get('if_variant_in')
         exact_pkg = rule_dict.get('exact_pkg')
         ignore_deps = rule_dict.get('ignore_deps', False)
 
+        if exact_pkg is not None and not isinstance(exact_pkg, bool):
+            raise Exception('exact_pkg must be boolean: %r' % (exact_pkg,))
+        if not isinstance(ignore_deps, bool):
+            raise Exception('ignore_deps must be boolean: %r' % (ignore_deps,))
         if ignore_deps and exact_pkg is not True:
             raise Exception(
                 'ignore_deps requires exact_pkg to be True'
@@ -640,6 +646,10 @@ def load_config(config_pathname: str, kmod_list: KModList, variants=None):
             rule = key
             package_name = value
 
+            if not isinstance(rule, str) or not isinstance(package_name, str):
+                raise Exception(
+                    'Rule %r maps to non-string package %r' % (rule, package_name)
+                )
             if not kmod_pkg_list.get(package_name):
                 raise Exception('Unknown package ' + package_name)
 

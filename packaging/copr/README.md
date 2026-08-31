@@ -55,6 +55,12 @@ rpmbuild -bs packaging/copr/kernel.spec \
   --define "_srcrpmdir $builddir"
 ```
 
+Validate the module rule loader before submitting a source RPM:
+
+```sh
+python3 packaging/copr/test_filtermods_config.py
+```
+
 Submit the source RPM to every chroot enabled in the `chaos-kernel` COPR
 project:
 
