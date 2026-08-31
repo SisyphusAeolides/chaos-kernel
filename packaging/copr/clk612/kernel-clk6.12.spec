@@ -137,16 +137,11 @@ Summary: The Linux kernel
 %global pkg_suffix clk%{kernel_major_minor}
 # kernel package name
 %global package_name kernel-%{pkg_suffix}
-# Select the module/config map from the buildroot.  Fedora does not ship the
-# Rocky-only partner subpackage, so using the Rocky map there leaves kAFS and
-# rxrpc modules unpackaged.  RLC/EL buildroots continue to use the Rocky map.
-%if 0%{?fedora}
-%global include_fedora 1
-%global include_rocky 0
-%else
+# Keep the source-RPM package set stable when it is assembled in an EL host.
+# Fedora-specific source declarations are intentionally not enabled here;
+# Fedora chroots select their module map explicitly below.
 %global include_fedora 0
 %global include_rocky 1
-%endif
 # Include RHEL files
 %global include_rhel 0
 # Include RT files
@@ -170,7 +165,7 @@ Summary: The Linux kernel
 %define el_version 9
 %define kernel_major_minor 6.12
 %define kernel_patch 104
-%define buildid .chaos4
+%define buildid .chaos5
 %define source_buildid .1
 %define specversion %{kernel_major_minor}.%{kernel_patch}
 %define pkgrelease 1%{?buildid}
@@ -2825,7 +2820,7 @@ BuildKernel() {
         # this creates ../modules-*.list output, where each kmod path is as it
         # appears in modules.dep (relative to lib/modules/$KernelVer)
         ret=0
-%if 0%{?include_fedora}
+%if 0%{?fedora}
         %{SOURCE22} -l "../filtermods-$KernelVer.log" sort -d $RPM_BUILD_ROOT/lib/modules/$KernelVer/modules.dep -c %{SOURCE62} $variants_param -o .. || ret=$?
 %else
         %{SOURCE22} -l "../filtermods-$KernelVer.log" sort -d $RPM_BUILD_ROOT/lib/modules/$KernelVer/modules.dep -c %{SOURCE1007} $variants_param -o .. || ret=$?
@@ -4224,6 +4219,9 @@ fi\
 #
 #
 %changelog
+* Sun Aug 30 2026 SisyphusAeolides <SisyphusAeolides@pm.me> - 6.12.104-1.chaos5
+- Keep the host-built source RPM stable while selecting the Fedora module map in Fedora chroots.
+
 * Sun Aug 30 2026 SisyphusAeolides <SisyphusAeolides@pm.me> - 6.12.104-1.chaos4
 - Select the Fedora module map in Fedora chroots so all built modules are owned.
 
