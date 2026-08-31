@@ -939,6 +939,9 @@ Source1006: partial-snip.config
 Source1007: def_variants.yaml.rocky
 %endif
 
+# Keep both module maps in the source RPM; the buildroot selects one below.
+Source62: def_variants.yaml.fedora
+
 %if 0%{?include_fedora}
 Source50: x509.genkey.fedora
 
@@ -955,7 +958,6 @@ Source61: %{name}-x86_64-debug-fedora.config
 Source700: %{name}-riscv64-fedora.config
 Source701: %{name}-riscv64-debug-fedora.config
 
-Source62: def_variants.yaml.fedora
 %endif
 
 Source81: process_configs.sh
@@ -2823,7 +2825,11 @@ BuildKernel() {
         # this creates ../modules-*.list output, where each kmod path is as it
         # appears in modules.dep (relative to lib/modules/$KernelVer)
         ret=0
+%if 0%{?include_fedora}
+        %{SOURCE22} -l "../filtermods-$KernelVer.log" sort -d $RPM_BUILD_ROOT/lib/modules/$KernelVer/modules.dep -c %{SOURCE62} $variants_param -o .. || ret=$?
+%else
         %{SOURCE22} -l "../filtermods-$KernelVer.log" sort -d $RPM_BUILD_ROOT/lib/modules/$KernelVer/modules.dep -c %{SOURCE1007} $variants_param -o .. || ret=$?
+%endif
         if [ $ret -ne 0 ]; then
             echo "8< --- filtermods-$KernelVer.log ---"
             cat "../filtermods-$KernelVer.log"
@@ -4218,13 +4224,13 @@ fi\
 #
 #
 %changelog
-* Sun Aug 30 2026 Chaos Kernel Maintainers <maintainers@chaos-kernel.invalid> - 6.12.104-1.chaos4
+* Sun Aug 30 2026 SisyphusAeolides <SisyphusAeolides@pm.me> - 6.12.104-1.chaos4
 - Select the Fedora module map in Fedora chroots so all built modules are owned.
 
-* Sun Aug 30 2026 Chaos Kernel Maintainers <maintainers@chaos-kernel.invalid> - 6.12.104-1.chaos3
+* Sun Aug 30 2026 SisyphusAeolides <SisyphusAeolides@pm.me> - 6.12.104-1.chaos3
 - Install intel_sdsi into Fedora's merged-/usr sbin directory.
 
-* Sun Aug 30 2026 Chaos Kernel Maintainers <maintainers@chaos-kernel.invalid> - 6.12.104-1.chaos2
+* Sun Aug 30 2026 SisyphusAeolides <SisyphusAeolides@pm.me> - 6.12.104-1.chaos2
 - Select only the dracut PCR module available in each build root.
 
 * Thu Aug 20 2026 github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com> - 6.12.104-1.1.el9
