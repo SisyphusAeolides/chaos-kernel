@@ -813,7 +813,7 @@ BuildRequires: systemd-boot-unsigned
 # For systemd-stub and systemd-pcrphase
 BuildRequires: systemd-udev >= 252-1
 %if 0%{?fedora} >= 40
-BuildRequires: systemd-pcrphase
+BuildRequires: systemd
 %endif
 # For UKI kernel cmdline addons
 BuildRequires: systemd-ukify
