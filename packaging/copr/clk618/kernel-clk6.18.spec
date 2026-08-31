@@ -169,7 +169,7 @@ Summary: The Linux kernel
 %define el_version 10
 %define kernel_major_minor 6.18
 %define kernel_patch 43
-%define buildid .chaos1
+%define buildid .chaos2
 %define source_buildid .1
 %define specversion %{kernel_major_minor}.%{kernel_patch}
 %define pkgrelease 2%{?buildid}
@@ -2242,7 +2242,9 @@ openssl x509 -inform der -in %{ima_ca_cert} -out imaca.pem
 cat imaca.pem >> ../certs/rhel.pem
 
 for i in *.config; do
+%if 0%{?rhel}
   sed -i 's@CONFIG_SYSTEM_TRUSTED_KEYS=""@CONFIG_SYSTEM_TRUSTED_KEYS="certs/ciqkernel.pem"@' $i
+%endif
   sed -i 's@CONFIG_EFI_SBAT_FILE=""@CONFIG_EFI_SBAT_FILE="kernel.sbat"@' $i
 done
 # ifnarch noarch
@@ -4603,6 +4605,10 @@ fi\
 #
 #
 %changelog
+* Mon Aug 31 2026 Sisyphus Aeolides <SisyphusAeolides@pm.me> - 6.18.43-2.chaos2
+- Keep CIQ trusted-key injection limited to RLC/RHEL chroots so Fedora
+  builds retain their native trusted-key configuration.
+
 * Mon Aug 31 2026 Sisyphus Aeolides <SisyphusAeolides@pm.me> - 6.18.43-2.chaos1
 - Port the bounded Chaos Kernel feature set to CIQ CLK 6.18.
 - Use the standard kmod capability on RLC EL10 and Fedora builds.
