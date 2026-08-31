@@ -165,7 +165,7 @@ Summary: The Linux kernel
 %define el_version 9
 %define kernel_major_minor 6.12
 %define kernel_patch 104
-%define buildid .chaos6
+%define buildid .chaos7
 %define source_buildid .1
 %define specversion %{kernel_major_minor}.%{kernel_patch}
 %define pkgrelease 1%{?buildid}
@@ -646,6 +646,15 @@ Summary: The Linux kernel
 %define kernel_prereq  coreutils, systemd >= 203-2, /usr/bin/kernel-install
 %define initrd_prereq  dracut >= 027
 
+# CIQ's EL9 kmod package provides the ciq-kmod capability. RLC 10.2 is an
+# EL10 platform and ships the standard kmod package instead, so keep the
+# kernel installable there without introducing a CIQ-only runtime dependency.
+%if 0%{?rhel} >= 10
+%define chaos_kmod_requirement kmod
+%else
+%define chaos_kmod_requirement ciq-kmod
+%endif
+
 
 Name: %{package_name}
 License: ((GPL-2.0-only WITH Linux-syscall-note) OR BSD-2-Clause) AND ((GPL-2.0-only WITH Linux-syscall-note) OR BSD-3-Clause) AND ((GPL-2.0-only WITH Linux-syscall-note) OR CDDL-1.0) AND ((GPL-2.0-only WITH Linux-syscall-note) OR Linux-OpenIB) AND ((GPL-2.0-only WITH Linux-syscall-note) OR MIT) AND ((GPL-2.0-or-later WITH Linux-syscall-note) OR BSD-3-Clause) AND ((GPL-2.0-or-later WITH Linux-syscall-note) OR MIT) AND 0BSD AND BSD-2-Clause AND (BSD-2-Clause OR Apache-2.0) AND BSD-3-Clause AND BSD-3-Clause-Clear AND CC0-1.0 AND GFDL-1.1-no-invariants-or-later AND GPL-1.0-or-later AND (GPL-1.0-or-later OR BSD-3-Clause) AND (GPL-1.0-or-later WITH Linux-syscall-note) AND GPL-2.0-only AND (GPL-2.0-only OR Apache-2.0) AND (GPL-2.0-only OR BSD-2-Clause) AND (GPL-2.0-only OR BSD-3-Clause) AND (GPL-2.0-only OR CDDL-1.0) AND (GPL-2.0-only OR GFDL-1.1-no-invariants-or-later) AND (GPL-2.0-only OR GFDL-1.2-no-invariants-only) AND (GPL-2.0-only WITH Linux-syscall-note) AND GPL-2.0-or-later AND (GPL-2.0-or-later OR BSD-2-Clause) AND (GPL-2.0-or-later OR BSD-3-Clause) AND (GPL-2.0-or-later OR CC-BY-4.0) AND (GPL-2.0-or-later WITH GCC-exception-2.0) AND (GPL-2.0-or-later WITH Linux-syscall-note) AND ISC AND LGPL-2.0-or-later AND (LGPL-2.0-or-later OR BSD-2-Clause) AND (LGPL-2.0-or-later WITH Linux-syscall-note) AND LGPL-2.1-only AND (LGPL-2.1-only OR BSD-2-Clause) AND (LGPL-2.1-only WITH Linux-syscall-note) AND LGPL-2.1-or-later AND (LGPL-2.1-or-later WITH Linux-syscall-note) AND (Linux-OpenIB OR GPL-2.0-only) AND (Linux-OpenIB OR GPL-2.0-only OR BSD-2-Clause) AND Linux-man-pages-copyleft AND MIT AND (MIT OR Apache-2.0) AND (MIT OR GPL-2.0-only) AND (MIT OR GPL-2.0-or-later) AND (MIT OR LGPL-2.1-only) AND (MPL-1.1 OR GPL-2.0-only) AND (X11 OR GPL-2.0-only) AND (X11 OR GPL-2.0-or-later) AND Zlib AND (copyleft-next-0.3.1 OR GPL-2.0-or-later)
@@ -664,7 +673,7 @@ ExclusiveOS: Linux
 Requires: %{name}-core-uname-r = %{KVERREL}
 Requires: %{name}-modules-uname-r = %{KVERREL}
 Requires: %{name}-modules-core-uname-r = %{KVERREL}
-Requires: ciq-kmod
+Requires: %{chaos_kmod_requirement}
 Provides: installonlypkg(kernel)
 Provides: kernel = %{specversion}-%{pkg_release}
 %endif
@@ -4219,6 +4228,9 @@ fi\
 #
 #
 %changelog
+* Mon Aug 31 2026 Sisyphus Aeolides <SisyphusAeolides@pm.me> - 6.12.104-1.chaos7
+- Use the standard kmod capability on EL10 so the CLK kernel installs on RLC 10.2.
+
 * Sun Aug 30 2026 Sisyphus Aeolides <SisyphusAeolides@pm.me> - 6.12.104-1.chaos6
 - Make the CLK module-package solver portable and honor exact ignore-deps rules.
 

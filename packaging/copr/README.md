@@ -13,6 +13,9 @@ The current CIQ package in `clk612/kernel-clk6.12.spec` targets the running
 CLK 6.12.104 source layout. Neither series is a universal patch for arbitrary
 Linux trees. Check another tree first:
 
+The CLK spec uses CIQ's `ciq-kmod` capability on EL9 and standard `kmod` on
+EL10, which keeps the same source RPM installable on CIQ RLC 10.2.
+
 ```sh
 ./apply-chaos-patches.sh --check --strict /path/to/linux
 ```
