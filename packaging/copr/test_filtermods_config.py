@@ -11,6 +11,7 @@ MAPS = (
     ROOT / "def_variants.yaml.fedora",
     ROOT / "def_variants.yaml.rhel",
     ROOT / "clk612" / "def_variants.yaml.rocky",
+    ROOT / "clk618" / "def_variants.yaml.rocky",
 )
 
 
@@ -63,7 +64,11 @@ kernel/base.ko:
 
 
 def main():
-    for implementation in (ROOT / "filtermods.py", ROOT / "clk612" / "filtermods.py"):
+    for implementation in (
+        ROOT / "filtermods.py",
+        ROOT / "clk612" / "filtermods.py",
+        ROOT / "clk618" / "filtermods.py",
+    ):
         module = load_filtermods(implementation)
         for rule_map in MAPS:
             loaded = module.load_config(str(rule_map), None)

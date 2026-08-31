@@ -17,7 +17,7 @@ Modes:
   --apply         Apply compatible patches to KERNEL_TREE.
   --strict        Stop and fail when any required patch does not apply (default).
   --best-effort   Skip incompatible patches and their dependents.
-  --series NAME   Select patch series: auto (default), clk6.12, or legacy.
+  --series NAME   Select patch series: auto (default), clk6.18, clk6.12, or legacy.
 
 The tree must be a clean, disposable kernel source tree when --apply is used.
 EOF
@@ -47,7 +47,7 @@ while [ "$#" -gt 0 ]; do
 			shift
 			[ "$#" -gt 0 ] || { usage >&2; exit 2; }
 			case "$1" in
-				auto|clk6.12|legacy)
+				auto|clk6.18|clk6.12|legacy)
 					series=$1
 					;;
 				*)
@@ -109,16 +109,42 @@ if [ "$series" = auto ]; then
 	kernel_version=$(sed -n -e 's/^VERSION[[:space:]]*=[[:space:]]*//p' \
 		-e 's/^PATCHLEVEL[[:space:]]*=[[:space:]]*//p' "$kernel_tree/Makefile" |
 		tr '\n' '.' | sed 's/\.$//')
-	if [ "$kernel_version" = 6.12 ]; then
+	if [ "$kernel_version" = 6.18 ]; then
+		series=clk6.18
+		if [ -d "$patch_dir/clk618" ]; then
+			patch_dir=$patch_dir/clk618
+		fi
+	elif [ "$kernel_version" = 6.12 ]; then
 		series=clk6.12
 	else
 		series=legacy
 	fi
 fi
 
+if [ "$series" = clk6.18 ] && [ -d "$patch_dir/clk618" ]; then
+	patch_dir=$patch_dir/clk618
+fi
+
 declare -a patches
 declare -A dependencies
-if [ "$series" = clk6.12 ]; then
+if [ "$series" = clk6.18 ]; then
+	# The CLK 6.18 source layout needs a reviewed port for the hooks whose
+	# upstream anchors moved. The port follows the common math/OOM/TCP base.
+	patches=(
+		0001-lib-add-bounded-fixed-point-chaos-math.patch
+		0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch
+		0006-tcp-add-bounded-Roessler-congestion-control.patch
+		0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch
+		0010-clk6.18-enable-full-chaos-feature-set.patch
+	)
+	dependencies=(
+		[0001-lib-add-bounded-fixed-point-chaos-math.patch]=''
+		[0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
+		[0006-tcp-add-bounded-Roessler-congestion-control.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
+		[0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch'
+		[0010-clk6.18-enable-full-chaos-feature-set.patch]='0001-lib-add-bounded-fixed-point-chaos-math.patch 0003-mm-detect-nonlinear-free-page-divergence-at-OOM.patch 0006-tcp-add-bounded-Roessler-congestion-control.patch 0007-lib-add-Lorenz-Mandelbrot-and-Lyapunov-dynamics.patch'
+	)
+elif [ "$series" = clk6.12 ]; then
 	# The CLK 6.12 source layout needs a reviewed port for the hooks whose
 	# upstream anchors moved. The port follows the common math/OOM/TCP base.
 	patches=(
@@ -163,7 +189,28 @@ else
 fi
 
 declare -A state
+declare -a check_applied
 failed=0
+
+cleanup_check_tree()
+{
+	local index patch_path cleanup_failed=0
+
+	[ "$mode" = check ] || return 0
+	for ((index=${#check_applied[@]} - 1; index >= 0; index--)); do
+		patch_path=${check_applied[$index]}
+		if ! git -C "$kernel_tree" apply -R --whitespace=nowarn "$patch_path"; then
+			printf 'FAIL cleanup: could not reverse %s; source tree may be modified\n' \
+				"$(basename "$patch_path")" >&2
+			cleanup_failed=1
+		fi
+	done
+	return "$cleanup_failed"
+}
+
+if [ "$mode" = check ]; then
+	trap cleanup_check_tree EXIT
+fi
 
 for patch_name in "${patches[@]}"; do
 	patch_path=$patch_dir/$patch_name
@@ -221,10 +268,27 @@ for patch_name in "${patches[@]}"; do
 		printf 'APPLY %s\n' "$patch_name"
 		state[$patch_name]=applied
 	else
+		if ! git -C "$kernel_tree" apply --whitespace=nowarn "$patch_path"; then
+			printf 'FAIL %s: check passed but temporary application failed\n' "$patch_name" >&2
+			state[$patch_name]=failed
+			failed=1
+			if [ "$policy" = strict ]; then
+				exit 1
+			fi
+			continue
+		fi
+		check_applied+=("$patch_path")
 		printf 'PASS %s\n' "$patch_name"
 		state[$patch_name]=check-pass
 	fi
 done
+
+if [ "$mode" = check ]; then
+	if ! cleanup_check_tree; then
+		exit 1
+	fi
+	trap - EXIT
+fi
 
 if [ "$failed" -ne 0 ]; then
 	if [ "$policy" = best-effort ]; then

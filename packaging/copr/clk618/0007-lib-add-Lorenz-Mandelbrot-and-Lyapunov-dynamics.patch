@@ -1,0 +1,146 @@
+From ed3ece3f74a07005b76cda5771c7bea3c72962bb Mon Sep 17 00:00:00 2001
+From: Sisyphus Aeolides <SisyphusAeolides@pm.me>
+Date: Fri, 28 Aug 2026 11:36:21 -0500
+Subject: [PATCH] lib: add Lorenz Mandelbrot and Lyapunov dynamics
+
+
+diff --git a/include/linux/chaos_math.h b/include/linux/chaos_math.h
+index 5fc151b..604e758 100644
+--- a/include/linux/chaos_math.h
++++ b/include/linux/chaos_math.h
+@@ -8,8 +8,11 @@
+ 
+ u32 chaos_logistic_step(u32 state);
+ u64 chaos_mix64(u64 value);
++u32 chaos_lorenz_step(s32 *x, s32 *y, s32 *z, u32 drive);
+ u32 chaos_roessler_step(s32 *x, s32 *y, s32 *z, u32 drive);
+ void chaos_duffing_step(s32 *x, s32 *velocity, u32 drive);
++u32 chaos_mandelbrot_escape(s32 real, s32 imag, u32 max_iter);
++s32 chaos_lyapunov_step(u64 previous, u64 sample);
+ u32 chaos_divergence_score(u64 previous, u64 sample);
+ 
+ #endif
+diff --git a/lib/chaos_math.c b/lib/chaos_math.c
+index 2b439fd..9047b93 100644
+--- a/lib/chaos_math.c
++++ b/lib/chaos_math.c
+@@ -10,6 +10,11 @@ static s32 chaos_q16_mul(s32 a, s32 b)
+ 	return (s32)(((s64)a * b) >> 16);
+ }
+ 
++static s32 chaos_q16_clamp(s64 value, s32 low, s32 high)
++{
++	return (s32)clamp_t(s64, value, low, high);
++}
++
+ u32 chaos_logistic_step(u32 state)
+ {
+ 	u64 product, next;
+@@ -32,6 +37,29 @@ u64 chaos_mix64(u64 value)
+ }
+ EXPORT_SYMBOL_GPL(chaos_mix64);
+ 
++u32 chaos_lorenz_step(s32 *x, s32 *y, s32 *z, u32 drive)
++{
++	const s32 sigma = 655360; /* 10.0 in Q16.16 */
++	const s32 rho = 1835008; /* 28.0 in Q16.16 */
++	const s32 beta = 174763; /* 8/3 in Q16.16 */
++	s32 dx, dy, dz, forcing;
++
++	/* Euler step at 1/64, with a bounded external drive. */
++	dx = chaos_q16_mul(sigma, *y - *x);
++	dy = chaos_q16_mul(*x, rho - *z) - *y;
++	dz = chaos_q16_mul(*x, *y) - chaos_q16_mul(beta, *z);
++	forcing = (s32)(drive >> 16) - 32768;
++	*x = chaos_q16_clamp((s64)*x + (dx >> 6) + (forcing >> 9),
++			    -64 * CHAOS_Q16_ONE, 64 * CHAOS_Q16_ONE);
++	*y = chaos_q16_clamp((s64)*y + (dy >> 6),
++			    -64 * CHAOS_Q16_ONE, 64 * CHAOS_Q16_ONE);
++	*z = chaos_q16_clamp((s64)*z + (dz >> 6),
++			    -64 * CHAOS_Q16_ONE, 64 * CHAOS_Q16_ONE);
++	return chaos_mix64((u32)*x ^ ((u64)(u32)*y << 21) ^
++			   ((u64)(u32)*z << 42) ^ drive);
++}
++EXPORT_SYMBOL_GPL(chaos_lorenz_step);
++
+ u32 chaos_roessler_step(s32 *x, s32 *y, s32 *z, u32 drive)
+ {
+ 	const s32 a = 13107, b = 13107, c = 373555;
+@@ -66,6 +94,74 @@ void chaos_duffing_step(s32 *x, s32 *velocity, u32 drive)
+ }
+ EXPORT_SYMBOL_GPL(chaos_duffing_step);
+ 
++u32 chaos_mandelbrot_escape(s32 real, s32 imag, u32 max_iter)
++{
++	s32 zr = 0, zi = 0;
++	u32 i;
++
++	max_iter = min(max_iter, 16U);
++	for (i = 0; i < max_iter; i++) {
++		s32 zr2 = chaos_q16_mul(zr, zr);
++		s32 zi2 = chaos_q16_mul(zi, zi);
++		s32 cross = chaos_q16_mul(zr, zi);
++
++		if ((s64)zr2 + zi2 > 4LL * CHAOS_Q16_ONE)
++			return i;
++		zr = chaos_q16_clamp((s64)zr2 - zi2 + real,
++				    -8 * CHAOS_Q16_ONE, 8 * CHAOS_Q16_ONE);
++		zi = chaos_q16_clamp((s64)cross * 2 + imag,
++				    -8 * CHAOS_Q16_ONE, 8 * CHAOS_Q16_ONE);
++	}
++	return max_iter;
++}
++EXPORT_SYMBOL_GPL(chaos_mandelbrot_escape);
++
++static s32 chaos_q16_ln(u32 value)
++{
++	const s32 ln2 = 45426; /* ln(2) in Q16.16 */
++	s32 normalized = (s32)value;
++	s32 y, y2, term, sum;
++	int exponent = 0;
++
++	if (!normalized)
++		return S32_MIN;
++	while (normalized >= 2 * CHAOS_Q16_ONE) {
++		normalized >>= 1;
++		exponent++;
++	}
++	while (normalized < CHAOS_Q16_ONE / 2) {
++		normalized <<= 1;
++		exponent--;
++	}
++	y = (s32)div_s64((s64)(normalized - CHAOS_Q16_ONE) * CHAOS_Q16_ONE,
++			 (s64)normalized + CHAOS_Q16_ONE);
++	y2 = chaos_q16_mul(y, y);
++	term = y;
++	sum = y;
++	term = chaos_q16_mul(term, y2);
++	sum += term / 3;
++	term = chaos_q16_mul(term, y2);
++	sum += term / 5;
++	term = chaos_q16_mul(term, y2);
++	sum += term / 7;
++	return chaos_q16_clamp((s64)2 * sum + (s64)exponent * ln2,
++			       S32_MIN, S32_MAX);
++}
++
++s32 chaos_lyapunov_step(u64 previous, u64 sample)
++{
++	u64 high = max(previous, sample) | 1;
++	u64 low = min(previous, sample) | 1;
++	u64 ratio;
++
++	if (!previous && !sample)
++		return 0;
++	ratio = min_t(u64, mul_u64_u64_div_u64(high, CHAOS_Q16_ONE, low),
++			      16ULL * CHAOS_Q16_ONE);
++	return chaos_q16_ln((u32)max_t(u64, ratio, CHAOS_Q16_ONE / 16));
++}
++EXPORT_SYMBOL_GPL(chaos_lyapunov_step);
++
+ u32 chaos_divergence_score(u64 previous, u64 sample)
+ {
+ 	u64 high = max(previous, sample) | 1;
+-- 
+2.55.0
+

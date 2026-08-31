@@ -22,8 +22,8 @@ expensive math and shared mutable state out of hot paths.
 
 The production implementation is maintained as reviewable kernel patches
 under `packaging/copr/` and applied directly by the RPM spec. The CIQ CLK
-6.12.104 port is in `packaging/copr/clk612/`; it applies the common math,
-OOM, and TCP patches plus the reviewed 6.12 scheduler, random, block, and
+6.18.43 port is in `packaging/copr/clk618/`; it applies the common math,
+OOM, and TCP patches plus the reviewed 6.18 scheduler, random, block, and
 memory-observation port. `chaos-math/` is a `no_std` Rust reference
 implementation with the same fixed-point behavior.
 
@@ -31,8 +31,9 @@ implementation with the same fixed-point behavior.
 
 These are in-tree patches and cannot be universal across arbitrary Linux
 releases: scheduler, block, random, TCP, and cgroup internals change between
-kernel families. The runner selects the reviewed CLK 6.12 series for a 6.12
-source tree and the legacy series for older trees; both are strict by default.
+kernel families. The runner selects the reviewed CLK 6.18 series for a 6.18
+source tree, the reviewed CLK 6.12 series for a 6.12 source tree, and the
+legacy series for older trees; all are strict by default.
 An unfamiliar kernel family must receive its own reviewed port before it can
 claim full feature coverage.
 
@@ -62,8 +63,8 @@ compatible patches, and never changes the supplied source tree, unloads a
 driver, installs a kernel, or reboots the host automatically. The default
 performance preset enables the complete bounded feature set: CORE, built-in
 Rössler TCP as the default congestion controller, and the bounded Duffing
-block path. The packaged CLK 6.12 build also merges these defaults through
-`packaging/copr/clk612/kernel-local`. The block path can be disabled for
+block path. The packaged CLK 6.18 build also merges these defaults through
+`packaging/copr/clk618/kernel-local`. The block path can be disabled for
 recovery or comparison with `blk_mq.chaos_bypass_shift=0`.
 
 Check portability first:

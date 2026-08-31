@@ -268,9 +268,9 @@ class KernelBuilder:
                 [
                     "git",
                     "-c",
-                    "user.name=Kernel Builder",
+                    "user.name=Sisyphus Aeolides",
                     "-c",
-                    "user.email=builder@localhost",
+                    "user.email=SisyphusAeolides@pm.me",
                     "commit",
                     "--quiet",
                     "-m",

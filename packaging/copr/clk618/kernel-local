@@ -1,0 +1,11 @@
+# This file is intentionally left empty in the stock kernel. Its a nicety
+# added for those wanting to do custom rebuilds with altered config opts.
+
+# Chaos Kernel defaults: compile and enable the complete bounded feature set.
+# The implementation remains fixed-point and bounded; these options select
+# the always-on scheduler/TCP paths in the packaged CLK 6.18 build.
+CONFIG_SCHED_CORE=y
+CONFIG_SCHED_DEBUG=y
+CONFIG_TCP_CONG_ROESSLER=y
+CONFIG_DEFAULT_ROESSLER=y
+CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y

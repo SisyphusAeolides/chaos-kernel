@@ -1,5 +1,5 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Chaos Kernel Maintainers <chaos-kernel@localhost>
+From: Sisyphus Aeolides <SisyphusAeolides@pm.me>
 Date: Sun, 30 Aug 2026 10:00:00 -0500
 Subject: [PATCH] clk 6.12: enable full bounded chaos feature set
 
@@ -179,4 +179,3 @@ documented kernel parameter.
  
  	if (oom_killer_disabled)
  		return false;
-
