@@ -137,16 +137,22 @@ Summary: The Linux kernel
 %global pkg_suffix clk%{kernel_major_minor}
 # kernel package name
 %global package_name kernel-%{pkg_suffix}
-# Include Fedora files
+# Select the module/config map from the buildroot.  Fedora does not ship the
+# Rocky-only partner subpackage, so using the Rocky map there leaves kAFS and
+# rxrpc modules unpackaged.  RLC/EL buildroots continue to use the Rocky map.
+%if 0%{?fedora}
+%global include_fedora 1
+%global include_rocky 0
+%else
 %global include_fedora 0
+%global include_rocky 1
+%endif
 # Include RHEL files
 %global include_rhel 0
 # Include RT files
 %global include_rt 0
 # Include Automotive files
 %global include_automotive 0
-# Include Rocky files
-%global include_rocky 1
 # Provide Patchlist.changelog file
 %global patchlist_changelog 0
 # Set released_kernel to 1 when the upstream source tarball contains a
@@ -164,7 +170,7 @@ Summary: The Linux kernel
 %define el_version 9
 %define kernel_major_minor 6.12
 %define kernel_patch 104
-%define buildid .chaos3
+%define buildid .chaos4
 %define source_buildid .1
 %define specversion %{kernel_major_minor}.%{kernel_patch}
 %define pkgrelease 1%{?buildid}
@@ -4212,6 +4218,9 @@ fi\
 #
 #
 %changelog
+* Sun Aug 30 2026 Chaos Kernel Maintainers <maintainers@chaos-kernel.invalid> - 6.12.104-1.chaos4
+- Select the Fedora module map in Fedora chroots so all built modules are owned.
+
 * Sun Aug 30 2026 Chaos Kernel Maintainers <maintainers@chaos-kernel.invalid> - 6.12.104-1.chaos3
 - Install intel_sdsi into Fedora's merged-/usr sbin directory.
 
