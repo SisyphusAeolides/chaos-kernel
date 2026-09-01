@@ -172,7 +172,7 @@ Summary: The Linux kernel
 %define buildid .chaos2
 %define source_buildid .1
 %define specversion %{kernel_major_minor}.%{kernel_patch}
-%define pkgrelease 2%{?buildid}
+%define pkgrelease 3%{?buildid}
 %define kversion %{lua:print((rpm.expand("%{kernel_major_minor}"):match("^(%d+)")))}
 
 %define tarfile_release %{specversion}-2%{source_buildid}.el%{el_version}
